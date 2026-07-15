@@ -1,0 +1,66 @@
+# Local dev services that mirror the AWS stack used by notebooks/002-upload-data.ipynb:
+#   - Postgres  = stand-in for AWS RDS  (OLTP)
+#   - MinIO     = stand-in for AWS S3   (object storage)
+#
+# Usage:
+#   docker compose up -d            # start
+#   docker compose down             # stop
+#   docker compose down -v          # stop + delete data volumes
+#
+# Ports match .env defaults: Postgres 5435, MinIO 9000 (S3 API) / 9001 (console).
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: recsys-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: raw_data
+    ports:
+      - "5435:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d raw_data"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    container_name: recsys-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: admin
+      MINIO_ROOT_PASSWORD: Password1234
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # web console
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Create the S3 bucket once MinIO is up.
+  createbucket:
+    image: minio/mc:latest
+    container_name: recsys-createbucket
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 admin Password1234 &&
+      mc mb --ignore-existing local/recsys-ops &&
+      echo 'bucket recsys-ops ready'
+      "
+
+volumes:
+  postgres_data:
+  minio_data:
