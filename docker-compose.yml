@@ -1,13 +1,15 @@
 # Local dev services that mirror the AWS stack used by notebooks/002-upload-data.ipynb:
 #   - Postgres  = stand-in for AWS RDS  (OLTP)
 #   - MinIO     = stand-in for AWS S3   (object storage)
+#   - Redis     = Feast Feature Store online store (stand-in for AWS DynamoDB)
 #
 # Usage:
 #   docker compose up -d            # start
 #   docker compose down             # stop
 #   docker compose down -v          # stop + delete data volumes
 #
-# Ports match .env defaults: Postgres 5435, MinIO 9000 (S3 API) / 9001 (console).
+# Ports match .env defaults: Postgres 5435, MinIO 9000 (S3 API) / 9001 (console),
+# Redis 6379.
 
 services:
   postgres:
@@ -61,6 +63,71 @@ services:
       echo 'bucket recsys-ops ready'
       "
 
+  # Feast Feature Store online store (stand-in for AWS DynamoDB).
+  redis:
+    image: redis:7
+    container_name: recsys-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ── 007 MLflow tracking stack ────────────────────────────────────────────
+  # MLflow server: backend store = a dedicated `mlflow` DB on the Postgres
+  # service above; artifact store = MinIO (S3-compatible) under
+  # s3://recsys-ops/mlflow/. Mirrors the reference K8s mlflow-stack (MLflow +
+  # Postgres + MinIO) so 007 training logs here local-pro and on AWS just
+  # points MLFLOW_TRACKING_URI at an EC2-hosted MLflow + real S3.
+  # One-shot: create the `mlflow` database on Postgres (MLflow backend store).
+  createmlflowdb:
+    image: postgres:16
+    container_name: recsys-createmlflowdb
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: postgres
+    entrypoint: >
+      /bin/sh -c "
+      psql -h postgres -U postgres -d postgres -tc \"SELECT 1 FROM pg_database WHERE datname='mlflow'\" | grep -q 1
+      || psql -h postgres -U postgres -d postgres -c 'CREATE DATABASE mlflow';
+      echo 'mlflow database ready'
+      "
+
+  mlflow:
+    image: python:3.11-slim
+    container_name: recsys-mlflow
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      createmlflowdb:
+        condition: service_completed_successfully
+    environment:
+      # boto3 client for the MinIO artifact store.
+      MLFLOW_S3_ENDPOINT_URL: http://minio:9000
+      AWS_ACCESS_KEY_ID: admin
+      AWS_SECRET_ACCESS_KEY: Password1234
+      AWS_DEFAULT_REGION: ap-southeast-1
+    ports:
+      - "5000:5000"
+    command: >
+      bash -c "
+      pip install --no-cache-dir mlflow==2.16.2 psycopg2-binary boto3
+      && mlflow server --host 0.0.0.0 --port 5000
+         --backend-store-uri postgresql://postgres:postgres@postgres:5432/mlflow
+         --default-artifact-root s3://recsys-ops/mlflow/
+      "
+
 volumes:
   postgres_data:
   minio_data:
+  redis_data:
