@@ -1,0 +1,126 @@
+# KubeRay RayCluster values — CPU, standalone namespace `ray`, in-cluster MinIO.
+# Ported from the reference ray-cluster chart: GPU/Kubeflow/mlpipeline-minio-artifact
+# ties removed. MinIO creds come from the `minio-creds` Secret created by this
+# chart's templates/secret.yaml (same admin/Password1234 as the mlflow-stack).
+
+image:
+  # Built from infra/images/ray.Dockerfile; push via infra/scripts/build_push.sh.
+  repository: nmcuong08/recsys-ray
+  tag: v1
+  pullPolicy: Always
+
+nameOverride: "kuberay"
+fullnameOverride: ""
+imagePullSecrets: []
+
+common:
+  containerEnv: []
+
+head:
+  rayStartParams:
+    block: "true"
+    dashboard-host: "0.0.0.0"
+    temp-dir: "/mnt/ray"
+    num-gpus: "0"
+  containerEnv:
+    - name: MLFLOW_S3_ENDPOINT_URL
+      value: "http://minio-service.mlflow.svc.cluster.local:9000"
+    - name: MLFLOW_TRACKING_URI
+      value: "http://mlflow-tracking-service.mlflow.svc.cluster.local:5000"
+    - name: AWS_ACCESS_KEY_ID
+      valueFrom:
+        secretKeyRef:
+          name: minio-creds
+          key: accesskey
+    - name: AWS_SECRET_ACCESS_KEY
+      valueFrom:
+        secretKeyRef:
+          name: minio-creds
+          key: secretkey
+    - name: AWS_DEFAULT_REGION
+      value: "us-east-1"
+  resources:
+    limits:
+      cpu: "2"
+      memory: "4Gi"
+    requests:
+      cpu: "1"
+      memory: "2Gi"
+  annotations:
+    sidecar.istio.io/inject: "false"
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  podSecurityContext: {}
+  securityContext:
+    runAsUser: 0
+    runAsGroup: 0
+    privileged: true
+  volumeMounts:
+    - mountPath: /mnt/ray
+      name: ray-storage
+  volumes:
+    - name: ray-storage
+      persistentVolumeClaim:
+        claimName: ray-storage
+  sidecarContainers: []
+  command: []
+  args: []
+  headService: {}
+
+worker:
+  groupName: workergroup
+  replicas: 1
+  minReplicas: 1
+  maxReplicas: 2
+  rayStartParams:
+    num-gpus: "0"
+  containerEnv:
+    - name: MLFLOW_S3_ENDPOINT_URL
+      value: "http://minio-service.mlflow.svc.cluster.local:9000"
+    - name: MLFLOW_TRACKING_URI
+      value: "http://mlflow-tracking-service.mlflow.svc.cluster.local:5000"
+    - name: AWS_ACCESS_KEY_ID
+      valueFrom:
+        secretKeyRef:
+          name: minio-creds
+          key: accesskey
+    - name: AWS_SECRET_ACCESS_KEY
+      valueFrom:
+        secretKeyRef:
+          name: minio-creds
+          key: secretkey
+    - name: AWS_DEFAULT_REGION
+      value: "us-east-1"
+  resources:
+    limits:
+      cpu: "2"
+      memory: "4Gi"
+    requests:
+      cpu: "1"
+      memory: "2Gi"
+  annotations:
+    sidecar.istio.io/inject: "false"
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  podSecurityContext: {}
+  securityContext:
+    runAsUser: 0
+    runAsGroup: 0
+    privileged: true
+  volumeMounts:
+    - mountPath: /mnt/ray
+      name: ray-worker-storage
+  volumes:
+    - name: ray-worker-storage
+      persistentVolumeClaim:
+        claimName: ray-worker-storage
+  sidecarContainers: []
+  command: []
+  args: []
+
+additionalWorkerGroups: {}
+
+service:
+  type: ClusterIP
