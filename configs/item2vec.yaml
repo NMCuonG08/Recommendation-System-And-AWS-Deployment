@@ -28,7 +28,7 @@ model:
     choice: [64, 256]            # Ray Tune search space (reference tunes these)
 
 training:
-  max_epochs: 15
+  max_epochs: 5             # reduced from 15 for local-pro time budget
   batch_size: 512
   num_negative_samples: 3
   window_size: 3
@@ -51,7 +51,7 @@ experiment:
   tune_config:
     metric: val_loss
     mode: min
-    num_samples: 10          # number of Tune trials
+    num_samples: 3           # number of HP trials (reduced from 10 for local-pro)
 
 # MLflow tracking — resolved from env so local-pro and AWS share one config.
 mlflow:
@@ -81,7 +81,7 @@ trainer:
     mode: min
   early_stopping:
     monitor: val_loss
-    patience: 2
+    patience: 1             # reduced from 2 for local-pro time budget
     mode: min
     verbose: true
 

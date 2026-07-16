@@ -112,4 +112,11 @@ feature/output/**/*.parquet
 feature/feature_store/registry.db
 models/output/**/*.ckpt
 models/output/**/*.pt
-models/output/**/*.pth
+models/output/**/*.pth
+# Regenerable run artifacts (Evidently HTML, id mapper, training log, trash).
+# Keep committed: reports/figures/*.png + reports/*.json (referenced by docs).
+models/output/**/evidently_report_classification.html
+models/output/**/id_mapper.json
+models/output/**/idm.json
+models/output/**/*.log
+models/output/**/.trash_*/

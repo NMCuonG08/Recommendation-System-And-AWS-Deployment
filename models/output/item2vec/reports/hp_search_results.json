@@ -1,0 +1,33 @@
+{
+  "metric": "val_loss",
+  "mode": "min",
+  "trials": [
+    {
+      "trial": 0,
+      "embedding_dim": 64,
+      "learning_rate": 0.0027471251174267493,
+      "l2_reg": 0.0003765249501831186,
+      "val_loss": 0.5228338837623596
+    },
+    {
+      "trial": 1,
+      "embedding_dim": 256,
+      "learning_rate": 0.004981590552238295,
+      "l2_reg": 1.9166024706981723e-06,
+      "val_loss": 0.2073812484741211
+    },
+    {
+      "trial": 2,
+      "embedding_dim": 256,
+      "learning_rate": 0.005769520250036253,
+      "l2_reg": 0.0002281355236625612,
+      "val_loss": 0.481660395860672
+    }
+  ],
+  "best_val_loss": 0.2073812484741211,
+  "best_params": {
+    "embedding_dim": 256,
+    "learning_rate": 0.004981590552238295,
+    "l2_reg": 1.9166024706981723e-06
+  }
+}

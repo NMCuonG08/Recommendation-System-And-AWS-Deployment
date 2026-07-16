@@ -1,4 +1,4 @@
-"""Item2Vec training entrypoint — Ray Train + Tune + MLflow + Evidently.
+"""Item2Vec training entrypoint — Ray Train + MLflow + Evidently.
 
 Run:
     uv run python -m models.item2vec.train --config configs/item2vec.yaml
@@ -9,9 +9,13 @@ Ported back from the reference `src/model_item2vec/main.py` (full MLOps):
   1. (opt-in, --overfit) Overfit sanity check — train on one batch
      (`batch_sequences_overfit.jsonl`) for many epochs; expect val_loss -> ~0.
      Off by default to match the reference flow.
-  2. Ray Tune HP search — `TorchTrainer` + `Tuner` over `embedding_dim` (choice),
-     `learning_rate` / `l2_reg` (loguniform), `num_samples` trials; each trial
-     logs params/metrics to MLflow experiment `item2vec/hyperparameter_tuning`.
+  2. HP search — a manual loop of `num_samples` `TorchTrainer.fit()` runs
+     sampling `embedding_dim` (choice), `learning_rate` / `l2_reg` (loguniform);
+     each trial logs params/metrics to MLflow experiment
+     `item2vec/hyperparameter_tuning`, and its best val_loss is read back from
+     the trial's Lightning checkpoint. (Replaces a Ray `Tuner`-based search —
+     Ray 2.55's v2 `TorchTrainer` is not a Tune trainable, so `Tuner(trainer)`
+     raises; the manual loop is the v2-compatible equivalent.)
   3. Final training — best trial's params → a final `TorchTrainer` run that logs
      to MLflow experiment `item2vec/final_model`, saves `idm.json` + the
      TorchScript model to the MLflow Model Registry (`item2vec_skipgram`), and
@@ -21,11 +25,18 @@ Config is env-driven (`${VAR}` resolved from process env / `.env`) so the same
 config runs local-pro (RAY_ADDRESS=local, MLflow via docker-compose) and AWS
 (RAY_ADDRESS=auto on an EKS KubeRay head pod, MLflow in-cluster via the
 `infra/mlflow-stack` helm chart). See `docs/eks-deploy.md` for the EKS path.
+
+Note: on local-pro the engineer data dir is absolutized against the repo root
+before being shipped to workers, because Ray 2.55's working_dir packaging
+honors `.gitignore` (which excludes `feature/output/**/*.{jsonl,json}`) and the
+shipped package would otherwise lack the data. On EKS the path stays relative
+and ships via runtime_env.
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import shutil
@@ -36,16 +47,16 @@ from typing import Any, Dict
 
 import lightning as L
 import mlflow
+import numpy as np
 import psutil
 import ray
 import torch
 import yaml
 from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
 from loguru import logger
-from ray import train, tune
-from ray.train import CheckpointConfig, ScalingConfig
+from ray import train
+from ray.train import ScalingConfig
 from ray.train.torch import TorchTrainer
-from ray.tune import RunConfig, Tuner
 from torch.utils.data import DataLoader
 
 from feature.id_mapper import IDMapper
@@ -226,11 +237,18 @@ def train_func(config: Dict[str, Any], is_final_training: bool = False) -> None:
         )
 
         model = SkipGram(dataset.vocab_size, config["embedding_dim"])
-        trial_suffix = (
-            ""  # final training writes directly under final_checkpoint_dir
-            if is_final_training
-            else f"trial_{train.get_context().get_trial_id()}"
-        )
+        if is_final_training:
+            trial_suffix = ""  # final training writes directly under final_checkpoint_dir
+        else:
+            # Lazy: `config.get('trial_id', <default>)` would eagerly evaluate the
+            # default (Python evaluates dict.get's default arg before the lookup),
+            # and `train.get_context().get_trial_id()` raises outside a Tune
+            # session. The manual HP loop always sets `trial_id`, so resolve it
+            # lazily and only fall back to the Ray context when it is absent.
+            trial_id = config.get("trial_id")
+            if trial_id is None:
+                trial_id = train.get_context().get_trial_id()
+            trial_suffix = f"trial_{trial_id}"
         trial_dir = os.path.join(config["checkpoint_dir"], trial_suffix) if trial_suffix else config["checkpoint_dir"]
         lit_model = LitSkipGram(
             model,
@@ -555,6 +573,29 @@ def _train_loop_config(cfg: Dict[str, Any], checkpoint_dir: str) -> Dict[str, An
     }
 
 
+def _read_best_val_loss(ckpt_path: Path) -> float | None:
+    """Read the best monitored val_loss from a Lightning checkpoint's callback state.
+
+    Ray Train v2 does not surface per-trial metrics via `Result.metrics_dataframe`
+    when running outside Tune, so the trial's `ModelCheckpoint` callback state
+    (the lowest monitored `val_loss`) is the reliable source.
+
+    Args:
+        ckpt_path: Path to a Lightning `best-checkpoint.ckpt`.
+
+    Returns:
+        The best val_loss as a float, or None if the checkpoint / field is absent.
+    """
+    if not ckpt_path.exists():
+        return None
+    ck = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+    for cb in ck.get("callbacks", {}).values():
+        if isinstance(cb, dict) and "best_model_score" in cb:
+            score = cb["best_model_score"]
+            return float(score.item()) if hasattr(score, "item") else float(score)
+    return None
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Item2Vec training (Ray Tune + MLflow).")
     parser.add_argument(
@@ -608,70 +649,107 @@ def main() -> None:
     ray.init(address=ray_address, runtime_env=ray_env)
 
     use_gpu = cfg["trainer"]["use_gpu"]
-    train_loop_config = _train_loop_config(cfg, cfg["output"]["checkpoint_dir"])
+    is_local = ray_address is None  # local-pro; workers share the driver FS.
 
-    trainer = TorchTrainer(
-        train_loop_per_worker=train_func,
-        train_loop_config=train_loop_config,
+    # Ray 2.55's working_dir packaging honors .gitignore, which excludes
+    # `feature/output/**/*.{jsonl,json}`; the shipped package therefore lacks
+    # the data, so workers can't read the relative `engineer_dir`. Absolutize
+    # it against ROOT for local runs — workers on the same host read the host
+    # path directly. (EKS path unchanged: data ships via runtime_env to remote
+    # workers, and the head pod's working_dir is not filtered by this repo's
+    # .gitignore.)
+    data_path = (
+        str((ROOT / cfg["data"]["engineer_dir"]).resolve())
+        if is_local
+        else cfg["data"]["engineer_dir"]
+    )
+
+    emb_choices = cfg["model"]["embedding_dim"]["choice"]
+    lr_range = cfg["training"]["learning_rate"]["loguniform"]
+    l2_range = cfg["training"]["l2_reg"]["loguniform"]
+    num_samples = cfg["experiment"]["tune_config"]["num_samples"]
+    tune_metric = cfg["experiment"]["tune_config"]["metric"]  # "val_loss"
+    tune_mode = cfg["experiment"]["tune_config"]["mode"]       # "min"
+
+    rng = np.random.default_rng(seed=42)
+    best_val_loss = float("inf")
+    best_params: Dict[str, Any] = {}
+    trial_results: list[Dict[str, Any]] = []
+
+    logger.info(f"=== Manual HP search: {num_samples} trials (metric={tune_metric}, mode={tune_mode}) ===")
+    for i in range(num_samples):
+        emb_dim = int(rng.choice(emb_choices))
+        lr = float(10 ** rng.uniform(np.log10(lr_range[0]), np.log10(lr_range[1])))
+        l2 = float(10 ** rng.uniform(np.log10(l2_range[0]), np.log10(l2_range[1])))
+        logger.info(f"--- Trial {i + 1}/{num_samples}: emb_dim={emb_dim} lr={lr:.6f} l2={l2:.6f} ---")
+
+        trial_config = _train_loop_config(cfg, cfg["output"]["checkpoint_dir"])
+        trial_config["data_path"] = data_path
+        trial_config["trial_id"] = i
+        trial_config["embedding_dim"] = emb_dim
+        trial_config["learning_rate"] = lr
+        trial_config["l2_reg"] = l2
+
+        trial_trainer = TorchTrainer(
+            train_loop_per_worker=train_func,
+            train_loop_config=trial_config,
+            scaling_config=ScalingConfig(num_workers=1, use_gpu=use_gpu),
+        )
+        try:
+            trial_trainer.fit()
+        except Exception as e:
+            logger.error(f"Trial {i + 1} failed: {str(e)}")
+            trial_results.append(
+                {"trial": i, "embedding_dim": emb_dim, "learning_rate": lr,
+                 "l2_reg": l2, "val_loss": None, "error": str(e)}
+            )
+            continue
+
+        # Read the trial's best val_loss from its Lightning checkpoint.
+        # (Ray Train v2's Result.metrics_dataframe is None without Tune, so
+        # the checkpoint's ModelCheckpoint callback state is the source.)
+        trial_ckpt = (
+            Path(cfg["output"]["checkpoint_dir"])
+            / f"trial_{i}"
+            / cfg["trainer"]["checkpoint"]["filename"]
+        ).with_suffix(".ckpt")
+        val_loss = _read_best_val_loss(trial_ckpt)
+        logger.info(f"Trial {i + 1} val_loss={val_loss}")
+        trial_results.append(
+            {"trial": i, "embedding_dim": emb_dim, "learning_rate": lr,
+             "l2_reg": l2, "val_loss": val_loss}
+        )
+        if val_loss is not None and val_loss < best_val_loss:
+            best_val_loss = val_loss
+            best_params = {"embedding_dim": emb_dim, "learning_rate": lr, "l2_reg": l2}
+
+    # Persist the HP search results for the training report.
+    reports_dir = ROOT / "models" / "output" / "item2vec" / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    with open(reports_dir / "hp_search_results.json", "w") as f:
+        json.dump(
+            {"metric": tune_metric, "mode": tune_mode, "trials": trial_results,
+             "best_val_loss": best_val_loss, "best_params": best_params},
+            f, indent=2,
+        )
+    logger.info(f"HP search done. best_val_loss={best_val_loss} best_params={best_params}")
+
+    if not best_params:
+        raise RuntimeError("All HP trials failed — cannot run final training.")
+
+    logger.info("Starting final training with best parameters...")
+    final_config = _train_loop_config(cfg, cfg["output"]["final_checkpoint_dir"])
+    final_config["data_path"] = data_path
+    final_config.update(best_params)
+
+    final_trainer = TorchTrainer(
+        train_loop_per_worker=lambda config: train_func(config, is_final_training=True),
+        train_loop_config=final_config,
         scaling_config=ScalingConfig(num_workers=1, use_gpu=use_gpu),
     )
-
-    param_space = {
-        "train_loop_config": {
-            "embedding_dim": tune.choice(cfg["model"]["embedding_dim"]["choice"]),
-            "learning_rate": tune.loguniform(*cfg["training"]["learning_rate"]["loguniform"]),
-            "l2_reg": tune.loguniform(*cfg["training"]["l2_reg"]["loguniform"]),
-        }
-    }
-
-    tune_config = tune.TuneConfig(
-        metric=cfg["experiment"]["tune_config"]["metric"],
-        mode=cfg["experiment"]["tune_config"]["mode"],
-        num_samples=cfg["experiment"]["tune_config"]["num_samples"],
-    )
-
-    tuner = Tuner(
-        trainer,
-        param_space=param_space,
-        tune_config=tune_config,
-        run_config=RunConfig(
-            storage_path=cfg["output"]["storage_path"],
-            name=cfg["experiment"]["run_name"],
-            checkpoint_config=CheckpointConfig(num_to_keep=1),
-        ),
-    )
-
-    try:
-        results = tuner.fit()
-        logger.info(f"Tuning completed, num trials: {len(results)}")
-        if results:
-            best_trial = results.get_best_result("val_loss", "min")
-            logger.info(f"Best trial config: {best_trial.config}")
-            logger.info(f"Best trial val_loss: {best_trial.metrics['val_loss']}")
-
-            logger.info("Starting final training with best parameters...")
-            best_config = best_trial.config["train_loop_config"]
-            final_config = _train_loop_config(cfg, cfg["output"]["final_checkpoint_dir"])
-            final_config["embedding_dim"] = best_config["embedding_dim"]
-            final_config["learning_rate"] = best_config["learning_rate"]
-            final_config["l2_reg"] = best_config["l2_reg"]
-
-            final_trainer = TorchTrainer(
-                train_loop_per_worker=lambda config: train_func(
-                    config, is_final_training=True
-                ),
-                train_loop_config=final_config,
-                scaling_config=ScalingConfig(num_workers=1, use_gpu=use_gpu),
-            )
-
-            final_trainer.fit()
-            logger.info("Final training completed!")
-            logger.info(
-                f"Final model checkpoint saved at: {cfg['output']['final_checkpoint_dir']}"
-            )
-    except Exception as e:
-        logger.error(f"Tuning failed: {str(e)}")
-        raise
+    final_trainer.fit()
+    logger.info("Final training completed!")
+    logger.info(f"Final model checkpoint saved at: {cfg['output']['final_checkpoint_dir']}")
 
 
 if __name__ == "__main__":

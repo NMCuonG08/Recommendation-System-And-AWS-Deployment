@@ -291,6 +291,14 @@ check first (off by default).
 Open http://localhost:5000 → Experiments (`item2vec/hyperparameter_tuning`,
 `item2vec/final_model`) + Models (`item2vec_skipgram` with the champion version).
 
+After training, generate figures + a metrics summary:
+```bash
+PYTHONPATH=. uv run python -m models.item2vec.evaluate --config configs/item2vec.yaml
+```
+Figures land in `models/output/item2vec/reports/figures/`; the full written
+report (architecture, HP search, metrics, embedding analysis, limitations) is
+in **[`docs/item2vec-training-report.md`](item2vec-training-report.md)**.
+
 ### D.2 AWS real (EKS + KubeRay + in-cluster MLflow)
 
 The real "mẫu reference" path: an EKS cluster with the **KubeRay operator** running
@@ -384,6 +392,8 @@ Then in Jupyter run notebooks in order:
    MLflow + Evidently (Path D): `docker compose up -d` for MLflow, then
    `uv run python -m models.item2vec.train --config configs/item2vec.yaml`.
    Champion model lands in the MLflow Model Registry (`item2vec_skipgram`).
+   Then run `models.item2vec.evaluate` for figures — see
+   [`docs/item2vec-training-report.md`](item2vec-training-report.md) for results.
 
 ---
 
