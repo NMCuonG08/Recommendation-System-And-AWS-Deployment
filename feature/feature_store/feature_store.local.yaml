@@ -1,0 +1,27 @@
+# Feast Feature Store config — LOCAL dev (MovieLens).
+#
+# Local mirrors of the AWS stack in the reference project:
+#   offline_store: file  (parquet)   <- stands in for AWS S3 + Spark offline store
+#   online_store:  redis             <- stands in for AWS DynamoDB
+#   registry:      file (sqlite)     <- stands in for AWS RDS SQL registry
+#
+# To use locally:  cp feature_store.local.yaml feature_store.yaml
+# Then:  feast apply && feast materialize 2010-01-01T00:00:00 <checkpoint_ts>
+# (run from feature/feature_store, with Redis up via `docker compose up -d`)
+
+project: feature_store_recsys
+
+registry:
+  registry_type: file
+  path: registry.db
+
+provider: local
+
+entity_key_serialization_version: 2
+
+offline_store:
+  type: file
+
+online_store:
+  type: redis
+  connection_string: "localhost:6379"

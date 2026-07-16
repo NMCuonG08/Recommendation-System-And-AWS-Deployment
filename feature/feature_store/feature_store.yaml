@@ -1,0 +1,37 @@
+# Feast Feature Store config — AWS real (MovieLens).
+#
+# AWS services used:
+#   offline_store: file  (local parquet under feature/output)  — training data
+#                   (swap to `spark` + S3 paths for full AWS offline; see docs/README.md)
+#   online_store:  dynamodb  — online serving (Feast creates tables on `feast apply`)
+#   registry:      sql       — RDS Postgres db `registry_feature_store` (POSTGRES_URI_REGISTRY)
+#
+# Env vars consumed (set in .env, loaded before `feast apply`):
+#   POSTGRES_URI_REGISTRY  e.g. postgresql://postgres:pass@<rds-endpoint>:5432/registry_feature_store
+#   AWS_DEFAULT_REGION      e.g. ap-southeast-1
+#
+# The IAM user (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY) needs S3 + DynamoDB
+# permissions. DynamoDB needs no extra keys — it reuses the same IAM credentials.
+#
+# Run (from feature/feature_store, with .env exported):
+#   feast apply
+#   feast materialize 2010-01-01T00:00:00 <checkpoint_ts>
+#
+# Local mode:  cp feature_store.local.yaml feature_store.yaml  (Redis + sqlite + file)
+
+project: feature_store_recsys
+
+registry:
+  registry_type: sql
+  path: ${POSTGRES_URI_REGISTRY}
+
+provider: aws
+
+entity_key_serialization_version: 2
+
+offline_store:
+  type: file
+
+online_store:
+  type: dynamodb
+  region: ${AWS_DEFAULT_REGION}
