@@ -40,7 +40,7 @@ services:
       MINIO_ROOT_PASSWORD: Password1234
     ports:
       - "9000:9000"   # S3 API
-      - "9001:9001"   # web console
+      - "9101:9001"   # web console (host 9101 -> container 9001; 9001 is reserved by Windows)
     volumes:
       - minio_data:/data
     healthcheck:

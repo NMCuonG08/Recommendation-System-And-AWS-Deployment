@@ -9,7 +9,9 @@ ENV PYTHONUNBUFFERED=1 \
 WORKDIR /app
 
 # Install deps first (cache layer) — see requirements-ray.txt.
-COPY requirements-ray.txt ./
+# Build context is the repo root (so `COPY . /app` below bakes the whole repo),
+# so the requirements file is referenced via its infra/images/ path.
+COPY infra/images/requirements-ray.txt ./
 RUN pip install --no-cache-dir -r requirements-ray.txt
 
 # Bake the repo at /app so the head pod can run `python -m models.item2vec.train`
