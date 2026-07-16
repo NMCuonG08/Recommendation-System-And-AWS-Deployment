@@ -150,6 +150,185 @@ DATA_UPLOAD_USE_LOCAL=false
 
 ---
 
+## Path C — AWS Feature Store (DynamoDB + RDS SQL registry)
+
+Path B puts the **OLTP data** on AWS (RDS `raw_data` + S3). Path C puts the
+**Feast Feature Store** on AWS too, so online serving reads from DynamoDB and
+the feature-view registry lives in RDS (instead of local Redis + sqlite).
+
+`feature/feature_store/feature_store.yaml` is already the AWS config
+(`provider: aws`, `online_store: dynamodb`, `registry: sql`). Local mode is
+saved at `feature/feature_store/feature_store.local.yaml` — to revert:
+`cp feature/feature_store/feature_store.local.yaml feature/feature_store/feature_store.yaml`
+and bring Redis up via `docker compose up -d`.
+
+> Offline store stays `file` (reads the local parquet under `feature/output/`).
+> That is intentional — feature engineering computes locally; only **serving +
+> registry** go to AWS. To push offline to AWS too, switch `offline_store` to
+> `spark` and point the `FileSource` paths in `feature_views.py` at `s3://...`
+> (see the reference project's `feature_store/feature_store.yaml`).
+
+### C.1 What AWS services does this add?
+
+| Service | Purpose | Extra key needed? |
+|---------|---------|--------------------|
+| **DynamoDB** | Feast online store (online serving) | **No** — reuses `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`. Just needs IAM `dynamodb:*` permission. Feast creates tables on `feast apply`. |
+| **RDS Postgres (2nd db)** | Feast registry (`registry_feature_store`) | **No new key** — reuses the RDS master `PG_USER` / `PG_PASSWORD`. You create one extra empty database. |
+
+So **no new API keys** beyond what Path B already set. The remaining work is
+**IAM permissions** + **one extra RDS database** + **one URI**.
+
+### C.2 Give the IAM user DynamoDB permission
+
+The same IAM user whose `AWS_ACCESS_KEY_ID` you put in `.env` (Path B step 1)
+needs DynamoDB access in addition to S3.
+
+1. AWS Console → **IAM** → **Users** → your `recsys-dev` user → **Add permissions** →
+   **Attach policies directly**.
+2. For learning, attach **`AmazonDynamoDBFullAccess`** (narrow it in production —
+   e.g. a custom policy scoped to `Resource: arn:aws:dynamodb:<region>:<account>:table/*`).
+3. Save. No new access key is generated — the existing key now covers DynamoDB.
+
+> DynamoDB has no endpoint/credential field in `feature_store.yaml`. It picks up
+> `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_DEFAULT_REGION` from the
+> environment automatically.
+
+### C.3 Create the `registry_feature_store` database on RDS
+
+Feast's SQL registry needs a dedicated database on the **same** RDS instance
+that already hosts `raw_data`. Create it once:
+
+- RDS Console → your DB → **Actions** → **Query** (or connect via `psql` /
+  DBeaver using `PG_HOST` / `PG_PORT` / `PG_USER` / `PG_PASSWORD`), then run:
+
+```sql
+CREATE DATABASE registry_feature_store;
+```
+
+No tables needed — Feast creates its own `feast_metadata` etc. tables on
+`feast apply`.
+
+### C.4 Build `POSTGRES_URI_REGISTRY` in `.env`
+
+`feature_store.yaml` reads the registry URI from `${POSTGRES_URI_REGISTRY}`.
+Build it from the RDS master creds:
+
+```
+REGISTRY_DB=registry_feature_store
+POSTGRES_URI_REGISTRY=postgresql://<PG_USER>:<urlencoded PG_PASSWORD>@<PG_HOST>:<PG_PORT>/registry_feature_store
+```
+
+- **URL-encode the password** if it contains `@ : / # ? &` etc. (e.g. `p@ss` →
+  `p%40ss`). Quick encode: `python -c "import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1]))" 'yourpass'`
+- Example:
+  `postgresql://postgres:p%40ssw0rd@recsys-oltp.xxxxx.ap-southeast-1.rds.amazonaws.com:5432/registry_feature_store`
+
+### C.5 Apply + materialize
+
+From the repo root, load `.env` into the shell then run Feast from the
+`feature/feature_store` dir (the config + `entities.py` + `feature_views.py`
+live there):
+
+```bash
+# 1. set DATA_UPLOAD_USE_LOCAL=false and re-run 002 so OLTP is on RDS (if not already)
+# 2. create the registry db (C.3) once
+
+export $(grep -v '^#' .env | xargs)            # load AWS creds + POSTGRES_URI_REGISTRY + region
+cd feature/feature_store
+uv run feast apply                              # creates DynamoDB tables + registry schema
+# materialize from the local offline parquet -> DynamoDB, up to the OLTP max timestamp
+MATERIALIZE_CHECKPOINT_TIME=$(uv run ../../src/check_oltp_max_timestamp.py 2>&1 \
+  | awk -F'<ts>|</ts>' '{print $2}')
+uv run feast materialize 2010-01-01T00:00:00 "$MATERIALIZE_CHECKPOINT_TIME"
+```
+
+> `src/check_oltp_max_timestamp.py` reads `PG_*` from `.env` and prints the max
+> `timestamp` of `public.movie_ratings` wrapped in `<ts>…</ts>` tags (the `awk`
+> extracts it). If the OLTP table is empty, fall back to a fixed timestamp:
+> `uv run feast materialize 2010-01-01T00:00:00 2026-07-16T00:00:00`.
+
+### C.6 Verify
+
+- **DynamoDB:** AWS Console → DynamoDB → **Tables** — you should see
+  `feature_store_recsys_*` tables with item counts after materialize.
+- **Registry:** connect to `registry_feature_store` on RDS and check Feast's
+  metadata tables exist.
+
+---
+
+## Path D — MLflow tracking + Ray (007 Item2Vec training)
+
+Path B puts the OLTP data on AWS; Path C puts the Feast Feature Store on AWS.
+Path D puts the **Item2Vec training MLOps** on AWS too — Ray Tune HP search +
+MLflow tracking + Model Registry champion tagging + Evidently reports —
+mirroring the reference project's `src/model_item2vec/main.py` flow.
+
+`models/item2vec/train.py` drives `configs/item2vec.yaml`, which is **env-driven**
+(`${MLFLOW_TRACKING_URI}`, `${RAY_ADDRESS}`, …) so one config runs local-pro
+and AWS.
+
+### D.1 Local-pro (MLflow via docker-compose, Ray local)
+
+The `mlflow` + `createmlflowdb` services in `docker-compose.yml` run an MLflow
+server on http://localhost:5000 with a Postgres `mlflow` backend DB and a MinIO
+artifact store (`s3://recsys-ops/mlflow/`). Ray runs as a local in-process
+cluster (`RAY_ADDRESS=local`).
+
+```bash
+docker compose up -d                     # starts Postgres, MinIO, Redis, MLflow (+ creates `mlflow` DB)
+curl http://localhost:5000               # MLflow UI
+export $(grep -v '^#' .env | xargs)      # load MLFLOW_*, RAY_ADDRESS
+uv run python -m models.item2vec.train --config configs/item2vec.yaml
+```
+
+What happens: Ray Tune runs `num_samples` trials (each logs to MLflow
+`item2vec/hyperparameter_tuning`), picks the best by `val_loss`, then a final
+training logs the TorchScript SkipGram + `idm.json` to the Model Registry
+(`item2vec_skipgram`) and tags the champion version. Evidently classification
+reports are logged as artifacts. Add `--overfit` for a single-batch sanity
+check first (off by default).
+
+Open http://localhost:5000 → Experiments (`item2vec/hyperparameter_tuning`,
+`item2vec/final_model`) + Models (`item2vec_skipgram` with the champion version).
+
+### D.2 AWS real (EKS + KubeRay + in-cluster MLflow)
+
+The real "mẫu reference" path: an EKS cluster with the **KubeRay operator** running
+the Ray cluster, and an **in-cluster MLflow stack** (Postgres backend + MinIO
+artifact store) deployed via the `infra/mlflow-stack` helm chart. No EC2, no
+separate RDS/S3 — Postgres + MinIO run as pods in the cluster (mirror of the
+local-pro `docker-compose.yml` MLflow stack). CPU only (`t3.large`), MovieLens
+small.
+
+Full step-by-step (prereq tools → `terraform apply` → update-kubeconfig → ebs-csi
+→ build/push images → KubeRay operator → mlflow-stack helm → port-forward →
+ray-cluster helm → `kubectl exec` head pod to run train.py → verify MLflow UI +
+champion → teardown) is in **[`docs/eks-deploy.md`](eks-deploy.md)**.
+
+TL;DR from inside the Ray head pod (the only place these in-cluster DNS names
+resolve):
+
+```
+RAY_ADDRESS=auto
+MLFLOW_TRACKING_URI=http://mlflow-tracking-service.mlflow.svc.cluster.local:5000
+MLFLOW_S3_ENDPOINT_URL=http://minio-service.mlflow.svc.cluster.local:9000
+MLFLOW_AWS_ACCESS_KEY_ID=admin
+MLFLOW_AWS_SECRET_ACCESS_KEY=Password1234
+AWS_DEFAULT_REGION=ap-southeast-1
+```
+
+Then `python -m models.item2vec.train --config configs/item2vec.yaml`. Trials
+run on the EKS Ray cluster; MLflow logs to the in-cluster server with artifacts
+on the in-cluster MinIO (`s3://mlflow-artifacts`).
+
+> The local-pro MLflow stack (`docker-compose.yml` `mlflow` service) is the
+> 1:1 mirror of the in-cluster `infra/mlflow-stack` (MLflow + Postgres + MinIO),
+> so the training code is identical — only env changes. To move to real RDS +
+> S3 later, swap the helm values for an RDS backend + S3 artifact root and add
+> IRSA (commented in `infra/terraform_eks/main.tf`).
+
+---
+
 ## Environment variable reference
 
 | Var | Local value | AWS value |
@@ -167,6 +346,15 @@ DATA_UPLOAD_USE_LOCAL=false
 | `PG_PASSWORD` | *(empty→postgres)* | RDS master pass |
 | `PG_SCHEMA` | `public` | `public` |
 | `PG_TABLE` | `movie_ratings` | `movie_ratings` |
+| `REGISTRY_DB` | `registry_feature_store` | `registry_feature_store` |
+| `POSTGRES_URI_REGISTRY` | `postgresql://postgres:postgres@localhost:5435/registry_feature_store` | `postgresql://<user>:<urlencoded pass>@<rds-endpoint>:5432/registry_feature_store` |
+| `MLFLOW_TRACKING_URI` | `http://localhost:5000` | `http://mlflow-tracking-service.mlflow.svc.cluster.local:5000` |
+| `MLFLOW_BACKEND_STORE` | `postgresql://postgres:postgres@localhost:5435/mlflow` | *(in-cluster Postgres, managed by helm)* |
+| `MLFLOW_ARTIFACT_ROOT` | `s3://recsys-ops/mlflow` | `s3://mlflow-artifacts` |
+| `MLFLOW_S3_ENDPOINT_URL` | `http://localhost:9000` | `http://minio-service.mlflow.svc.cluster.local:9000` |
+| `MLFLOW_AWS_ACCESS_KEY_ID` | `admin` (MinIO) | `admin` (in-cluster MinIO) |
+| `MLFLOW_AWS_SECRET_ACCESS_KEY` | `Password1234` (MinIO) | `Password1234` (in-cluster MinIO) |
+| `RAY_ADDRESS` | `local` | `auto` (inside head pod) / `ray://raycluster-kuberay-head-svc:10001` (outside) |
 
 ---
 
@@ -188,6 +376,14 @@ Then in Jupyter run notebooks in order:
    `notebooks/data/001-prepare-dataset/clean.parquet`.
 2. **`002-upload-data.ipynb`** — load clean parquet, split holdout, upload OLTP
    rows to Postgres and holdout parquet to S3 (MinIO or AWS).
+3. **`feature/etl/003` → `feature/engineer/004–006`** — feature ETL + engineering
+   + negative sampling + Item2Vec sequence prep (local compute).
+4. **Feast apply + materialize** (Path C, AWS only) — `feature/feature_store`:
+   `feast apply` then `feast materialize` to push features into DynamoDB.
+5. **`models/item2vec/007-train-item2vec.ipynb`** — train Item2Vec via Ray Tune +
+   MLflow + Evidently (Path D): `docker compose up -d` for MLflow, then
+   `uv run python -m models.item2vec.train --config configs/item2vec.yaml`.
+   Champion model lands in the MLflow Model Registry (`item2vec_skipgram`).
 
 ---
 
