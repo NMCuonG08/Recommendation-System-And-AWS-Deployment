@@ -1,0 +1,6 @@
+apiVersion: v2
+name: mlflow-stack
+description: MLflow Tracking stack (MinIO + Postgres + MLflow) for the 007 Item2Vec MLOps pipeline on EKS
+type: application
+version: 0.1.0
+appVersion: "2.16.2"

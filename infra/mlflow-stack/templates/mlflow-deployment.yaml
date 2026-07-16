@@ -1,0 +1,74 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mlflow-tracking-deployment
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: mlflow-tracking-deployment
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mlflow
+  template:
+    metadata:
+      labels:
+        app: mlflow
+    spec:
+      initContainers:
+        - name: init-minio-bucket
+          image: minio/mc
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              until mc alias set minio http://minio-service:9000 {{ .Values.minio.accessKey }} {{ .Values.minio.secretKey }}; do
+                echo "Waiting for MinIO to be ready...";
+                sleep 5;
+              done
+              if ! mc ls minio/{{ .Values.mlflow.bucket }} >/dev/null 2>&1; then
+                echo "Creating {{ .Values.mlflow.bucket }} bucket";
+                mc mb minio/{{ .Values.mlflow.bucket }};
+                mc policy set public minio/{{ .Values.mlflow.bucket }};
+              else
+                echo "Bucket {{ .Values.mlflow.bucket }} already exists";
+              fi
+      containers:
+        - name: mlflow-tracking
+          image: {{ .Values.mlflow.image }}
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 5000
+          env:
+            - name: MLFLOW_S3_ENDPOINT_URL
+              value: {{ .Values.mlflow.s3Endpoint | quote }}
+            - name: MLFLOW_S3_IGNORE_TLS
+              value: "true"
+            - name: AWS_ACCESS_KEY_ID
+              value: {{ .Values.minio.accessKey | quote }}
+            - name: AWS_SECRET_ACCESS_KEY
+              value: {{ .Values.minio.secretKey | quote }}
+            - name: AWS_DEFAULT_REGION
+              value: "us-east-1"
+          command:
+            - mlflow
+            - server
+            - --host
+            - 0.0.0.0
+            - --port
+            - "5000"
+            - --backend-store-uri
+            - "postgresql+psycopg2://postgres:{{ .Values.postgres.password }}@postgres-service:5432/postgres"
+            - --default-artifact-root
+            - "s3://{{ .Values.mlflow.bucket }}"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 5000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 5000
+            initialDelaySeconds: 20
+            periodSeconds: 20
