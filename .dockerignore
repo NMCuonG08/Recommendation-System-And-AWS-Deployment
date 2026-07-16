@@ -1,0 +1,17 @@
+# Build context filter for the ray worker image (infra/images/ray.Dockerfile).
+# Keeps the image small: exclude venvs, git, raw data, notebooks, and run
+# outputs — but KEEP feature/output/ (the 007 engineer artifacts: jsonl
+# sequences + idm.json, a few MB) so they bake into /app and ship to workers.
+.venv/
+.git/
+data/
+notebooks/
+models/output/
+mlruns/
+ray_results/
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
