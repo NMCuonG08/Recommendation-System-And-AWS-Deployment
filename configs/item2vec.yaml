@@ -1,0 +1,92 @@
+# Item2Vec training config — Ray Train + Tune + MLflow + Evidently (MovieLens).
+#
+# Ported back from the reference project's `configs/item2vec.yaml` (full MLOps):
+# Ray Tune HP search → final training with best params, MLflow tracking +
+# Model Registry champion tagging, Evidently classification report.
+#
+# Env-driven (`${VAR}` placeholders resolved by `models.item2vec.train.load_config`
+# against process env / `.env`) so the same config runs:
+#   - local-pro: RAY_ADDRESS=local, MLflow via `docker compose up -d` (localhost:5000,
+#     MinIO artifact), see docs/README.md "Path D".
+#   - AWS real:  RAY_ADDRESS=ray://... (EKS KubeRay), MLflow on EC2 + RDS + S3.
+#
+# Input sequences + id mapper are produced by `feature/engineer/006-prep-item2vec.ipynb`
+# and live under `feature/output/engineer/`.
+#
+# Run:  uv run python -m models.item2vec.train --config configs/item2vec.yaml
+
+data:
+  engineer_dir: feature/output/engineer
+  sequences_file: train_item_sequence.jsonl        # training sequences
+  val_sequences_file: val_item_sequence.jsonl      # validation sequences
+  overfit_sequences_file: batch_sequences_overfit.jsonl  # 1-batch sanity check (--overfit)
+  idm_file: idm.json                                # IDMapper (item_to_index)
+
+model:
+  type: skipgram
+  embedding_dim:
+    choice: [64, 256]            # Ray Tune search space (reference tunes these)
+
+training:
+  max_epochs: 15
+  batch_size: 512
+  num_negative_samples: 3
+  window_size: 3
+  num_workers: 0             # 0 = main process (Windows-safe; avoids spawn overhead)
+  learning_rate:
+    loguniform: [0.001, 0.01]   # Ray Tune loguniform search space
+  l2_reg:
+    loguniform: [1.0e-6, 1.0e-3]  # Ray Tune loguniform search space
+
+# Overfit sanity check (opt-in via `--overfit`): drive val_loss toward ~0 on one batch
+# before spending Ray Tune trials. Off by default to match the reference flow.
+overfit:
+  max_epochs: 50
+  batch_size: 512
+
+# Ray Tune HP search configuration.
+experiment:
+  run_name: item2vec
+  dataset_version: v1
+  tune_config:
+    metric: val_loss
+    mode: min
+    num_samples: 10          # number of Tune trials
+
+# MLflow tracking — resolved from env so local-pro and AWS share one config.
+mlflow:
+  tracking_uri: ${MLFLOW_TRACKING_URI}
+  s3_endpoint_url: ${MLFLOW_S3_ENDPOINT_URL}
+  s3_ignore_tls: true
+  aws_access_key_id: ${MLFLOW_AWS_ACCESS_KEY_ID}
+  aws_secret_access_key: ${MLFLOW_AWS_SECRET_ACCESS_KEY}
+
+# Ray cluster — `local` for single-machine; `ray://...` for EKS KubeRay.
+ray:
+  address: ${RAY_ADDRESS}
+  runtime_env:
+    working_dir: "."
+    py_modules:
+      - feature/id_mapper.py
+    env_vars:
+      PYTHONPATH: "."
+
+trainer:
+  accelerator: auto         # gpu if available, else cpu
+  use_gpu: false            # ScalingConfig(use_gpu=...); set true on GPU nodes
+  checkpoint:
+    filename: best-checkpoint
+    save_top_k: 1
+    monitor: val_loss
+    mode: min
+  early_stopping:
+    monitor: val_loss
+    patience: 2
+    mode: min
+    verbose: true
+
+output:
+  checkpoint_dir: models/output/item2vec/checkpoints
+  final_checkpoint_dir: models/output/item2vec/final_model
+  log_dir: models/output/item2vec/logs
+  storage_path: models/output/item2vec/ray_results
