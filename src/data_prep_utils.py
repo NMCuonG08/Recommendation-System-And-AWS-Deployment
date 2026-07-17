@@ -12,10 +12,39 @@ import os
 from pathlib import Path
 from typing import Dict, Iterable, Optional
 
+import numpy as np
 import pandas as pd
+from scipy.sparse import issparse
+from tqdm.auto import tqdm
 
 # File extensions we know how to load as a tabular frame.
 _TABLE_EXTS = {".csv", ".tsv", ".parquet", ".json", ".jsonl", ".txt"}
+
+
+def chunk_transform(df: pd.DataFrame, pipeline, chunk_size: int = 1000) -> np.ndarray:
+    """Apply a fitted sklearn pipeline to a DataFrame in chunks, return dense ndarray.
+
+    Ported from the reference project's `src/data_prep_utils.py`. Used to apply
+    the `item_metadata_pipeline.dill` (TF-IDF title + count-vectorized genres +
+    scaled rating aggregates) to the ranking dataset without materializing the
+    whole transformed matrix at once.
+
+    Args:
+        df: DataFrame with the columns the pipeline was fitted on.
+        pipeline: A fitted sklearn Pipeline / ColumnTransformer.
+        chunk_size: Rows per transform call.
+
+    Returns:
+        A dense ``(len(df), n_features)`` float ndarray.
+    """
+    transformed_chunks = []
+    for start in tqdm(range(0, df.shape[0], chunk_size), desc="Transforming chunks"):
+        end = min(start + chunk_size, df.shape[0])
+        chunk = pipeline.transform(df.iloc[start:end])
+        if issparse(chunk):
+            chunk = chunk.toarray()
+        transformed_chunks.append(chunk)
+    return np.vstack(transformed_chunks)
 
 
 def discover_dataset_files(dataset_path: str) -> pd.DataFrame:

@@ -1,0 +1,85 @@
+# SMOKE test config for the GRU sequence ranker — 1 HP trial, 1 epoch, early
+# stopping disabled. Validates champion-embedding loading + data pipeline + model
+# + MLflow logging + checkpoint save + final registry/champion-tag end-to-end
+# before the full run. Not committed to long-term docs workflow.
+#
+# Run: uv run python -m models.ranking_sequence.train --config configs/ranking_sequence.smoke.yaml
+
+data:
+  engineer_dir: feature/output/engineer
+  train_data_file: train_features_neg_df.parquet
+  val_data_file: val_features_neg_df.parquet
+  idm_file: idm.json
+  item_metadata_pipeline_file: item_metadata_pipeline.dill
+
+dataset:
+  user_col: user_indice
+  item_col: item_indice
+  rating_col: rating
+  timestamp_col: event_timestamp
+  required_columns:
+    - title
+    - genres
+    - movie_rating_cnt_90d
+    - movie_rating_avg_prev_rating_90d
+    - movie_rating_cnt_30d
+    - movie_rating_avg_prev_rating_30d
+    - movie_rating_cnt_7d
+    - movie_rating_avg_prev_rating_7d
+
+training:
+  max_epochs: 1
+  batch_size: 512
+  num_workers: 0
+  learning_rate:
+    loguniform: [1.0e-4, 1.0e-2]
+  l2_reg:
+    loguniform: [1.0e-6, 1.0e-3]
+  dropout:
+    uniform: [0.1, 0.5]
+  neg_to_pos_ratio: 3
+  top_k: 10
+  item_sequence_ts_bucket_size: 10
+  bucket_embedding_dim: 16
+
+experiment:
+  run_name: ranking
+  dataset_version: v1
+  tune_config:
+    metric: val_roc_auc
+    mode: max
+    num_samples: 1
+
+item2vec:
+  model_name: item2vec_skipgram
+  champion_tag_key: champion
+
+mlflow:
+  tracking_uri: ${MLFLOW_TRACKING_URI}
+  s3_endpoint_url: ${MLFLOW_S3_ENDPOINT_URL}
+  s3_ignore_tls: true
+  aws_access_key_id: ${MLFLOW_AWS_ACCESS_KEY_ID}
+  aws_secret_access_key: ${MLFLOW_AWS_SECRET_ACCESS_KEY}
+
+ray:
+  address: ${RAY_ADDRESS}
+
+trainer:
+  accelerator: auto
+  use_gpu: false
+  checkpoint:
+    filename: best-checkpoint
+    save_top_k: 1
+    monitor: val_roc_auc
+    mode: max
+  early_stopping:
+    monitor: val_roc_auc
+    patience: 10            # effectively disabled for 1-epoch smoke
+    mode: max
+    verbose: true
+
+output:
+  checkpoint_dir: models/output/ranking_sequence/checkpoints
+  final_checkpoint_dir: models/output/ranking_sequence/final_model
+  log_dir: models/output/ranking_sequence/logs
+  storage_path: models/output/ranking_sequence/ray_results

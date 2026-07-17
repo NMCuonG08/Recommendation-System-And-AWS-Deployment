@@ -1,0 +1,115 @@
+# GRU sequence ranker training config — Ray Train + MLflow + Evidently (MovieLens).
+#
+# Ported back from the reference project's `configs/ranking_sequence.yaml` (full
+# MLOps): a GRU ranker is trained over user item sequences with FROZEN Item2Vec
+# champion item embeddings (loaded from the MLflow Model Registry), registered as
+# `{run_name}_sequence_rating` and tagged `champion` by val_roc_auc.
+#
+# Ray 2.55 v2 note: like `configs/item2vec.yaml`, the HP search runs as a manual
+# `TorchTrainer.fit()` loop in `models.ranking_sequence.train` (the v2
+# `TorchTrainer` is not a Tune trainable), not `tune.run`.
+#
+# Env-driven (`${VAR}` placeholders resolved by `models.ranking_sequence.train
+# .load_config` against process env / `.env`) so the same config runs:
+#   - local-pro: RAY_ADDRESS=local, MLflow via `docker compose up -d` (localhost:5000,
+#     MinIO artifact), see docs/README.md "Path D".
+#   - AWS real:  RAY_ADDRESS=ray://... (EKS KubeRay), MLflow in-cluster.
+#
+# Input: `train_features_neg_df.parquet` / `val_features_neg_df.parquet` (positive
+# + popularity-negative-sampled interactions with item sequences + ts buckets +
+# item features) + `idm.json` + `item_metadata_pipeline.dill`, all produced by
+# `feature/engineer/004-features.ipynb` under `feature/output/engineer/`.
+#
+# Run:  uv run python -m models.ranking_sequence.train --config configs/ranking_sequence.yaml
+
+data:
+  engineer_dir: feature/output/engineer
+  train_data_file: train_features_neg_df.parquet
+  val_data_file: val_features_neg_df.parquet
+  idm_file: idm.json
+  item_metadata_pipeline_file: item_metadata_pipeline.dill
+
+dataset:
+  user_col: user_indice
+  item_col: item_indice
+  rating_col: rating
+  timestamp_col: event_timestamp
+  # Columns the item_metadata_pipeline (TF-IDF title + count genres + scaled
+  # rating aggregates) was fitted on. Missing cols are filled with 0.0 before
+  # transform. (MovieLens port uses movie_* prefixes, not the reference's
+  # parent_asin_*.)
+  required_columns:
+    - title
+    - genres
+    - movie_rating_cnt_90d
+    - movie_rating_avg_prev_rating_90d
+    - movie_rating_cnt_30d
+    - movie_rating_avg_prev_rating_30d
+    - movie_rating_cnt_7d
+    - movie_rating_avg_prev_rating_7d
+
+training:
+  max_epochs: 5             # reduced from 15 for local-pro time budget
+  batch_size: 256
+  num_workers: 0            # 0 = main process (Windows-safe)
+  learning_rate:
+    loguniform: [1.0e-4, 1.0e-2]   # HP search space
+  l2_reg:
+    loguniform: [1.0e-6, 1.0e-3]   # HP search space
+  dropout:
+    uniform: [0.1, 0.5]
+  neg_to_pos_ratio: 3       # positive-class weight in the weighted BCE loss
+  top_k: 10                 # ranking-eval top-k (final training only)
+  item_sequence_ts_bucket_size: 10
+  bucket_embedding_dim: 16
+
+# HP search (manual TorchTrainer.fit() loop — Ray 2.55 v2).
+experiment:
+  run_name: ranking             # experiments = {run_name}/{hyperparameter_tuning,final_model};
+                               # registered model = {run_name}_sequence_rating
+  dataset_version: v1
+  tune_config:
+    metric: val_roc_auc
+    mode: max                   # ranker maximizes ROC-AUC (item2vec minimizes val_loss)
+    num_samples: 3              # HP trials (reduced from 10 for local-pro)
+
+# Item2Vec champion (consumed for frozen item embeddings).
+item2vec:
+  model_name: item2vec_skipgram
+  champion_tag_key: champion
+
+# MLflow tracking — resolved from env so local-pro and AWS share one config.
+mlflow:
+  tracking_uri: ${MLFLOW_TRACKING_URI}
+  s3_endpoint_url: ${MLFLOW_S3_ENDPOINT_URL}
+  s3_ignore_tls: true
+  aws_access_key_id: ${MLFLOW_AWS_ACCESS_KEY_ID}
+  aws_secret_access_key: ${MLFLOW_AWS_SECRET_ACCESS_KEY}
+
+# Ray cluster — `local` for single-machine; `ray://...` for EKS KubeRay.
+ray:
+  address: ${RAY_ADDRESS}
+  runtime_env:
+    working_dir: "."
+    env_vars:
+      PYTHONPATH: "."
+
+trainer:
+  accelerator: auto
+  use_gpu: false            # CPU on local-pro / t3.large EKS nodes
+  checkpoint:
+    filename: best-checkpoint
+    save_top_k: 1
+    monitor: val_roc_auc
+    mode: max
+  early_stopping:
+    monitor: val_roc_auc
+    patience: 1             # reduced from 3 for local-pro time budget
+    mode: max
+    verbose: true
+
+output:
+  checkpoint_dir: models/output/ranking_sequence/checkpoints
+  final_checkpoint_dir: models/output/ranking_sequence/final_model
+  log_dir: models/output/ranking_sequence/logs
+  storage_path: models/output/ranking_sequence/ray_results
