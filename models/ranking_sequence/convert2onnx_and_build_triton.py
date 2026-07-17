@@ -721,6 +721,7 @@ input [
   {{ name: "user_ids", data_type: TYPE_STRING, dims: [{MAX_USER_ID_LEN}] }},
   {{ name: "input_seq", data_type: TYPE_STRING, dims: [-1] }},
   {{ name: "input_seq_ts_bucket", data_type: TYPE_INT64, dims: [{SEQ_LEN}] }},
+  {{ name: "target_items", data_type: TYPE_STRING, dims: [{MAX_ITEM_ID_LEN}] }},
   {{ name: "titles", data_type: TYPE_STRING, dims: [{MAX_ITEM_ID_LEN}] }},
   {{ name: "genres", data_type: TYPE_STRING, dims: [{MAX_CATEGORIES_LEN}] }},
   {{ name: "movie_rating_cnt_90d", data_type: TYPE_INT64, dims: [{MAX_ITEM_ID_LEN}] }},
@@ -740,7 +741,7 @@ ensemble_scheduling {{
       model_version: -1
       input_map {{ key: "user_ids" value: "user_ids" }}
       input_map {{ key: "input_seq" value: "input_seq" }}
-      input_map {{ key: "target_items" value: "titles" }}
+      input_map {{ key: "target_items" value: "target_items" }}
       output_map {{ key: "user_indices" value: "user_indices" }}
       output_map {{ key: "seq_indices" value: "seq_indices" }}
       output_map {{ key: "target_indices" value: "target_indices" }}

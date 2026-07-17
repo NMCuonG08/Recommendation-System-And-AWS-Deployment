@@ -1,0 +1,26 @@
+# Feast Feature Store config — DOCKER (MovieLens).
+#
+# Same as feature_store.local.yaml but the Redis online store points at the
+# `redis` compose service (not localhost). Mounted over feature_store.yaml in
+# the feast_api container:
+#   feature_store.docker.yaml:/app/feature_store/feature_store.yaml:ro
+#
+# Offline store stays `file` with ../output parquet — the feast_api container
+# mounts feature/output at /app/output so `materialize.py` works there too.
+
+project: feature_store_recsys
+
+registry:
+  registry_type: file
+  path: registry.db
+
+provider: local
+
+entity_key_serialization_version: 2
+
+offline_store:
+  type: file
+
+online_store:
+  type: redis
+  connection_string: "redis:6379"

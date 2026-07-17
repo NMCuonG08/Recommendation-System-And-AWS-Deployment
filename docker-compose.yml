@@ -78,6 +78,25 @@ services:
       timeout: 5s
       retries: 10
 
+  # Qdrant vector DB — indexes the Item2Vec item embeddings (Stage 1 retrieval).
+  # `src/caching_offline/load_qdrant.py` upserts embeddings here and precomputes
+  # `rec:{movieId}` (top-K similar) + `popular_movie_score` into Redis above.
+  # Port 6333 = REST API (used by the loader), 6433 = gRPC.
+  qdrant:
+    image: qdrant/qdrant:v1.12.4
+    container_name: recsys-qdrant
+    restart: unless-stopped
+    ports:
+      - "6333:6333"
+      - "6433:6433"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/localhost/6333 && echo -e 'GET / HTTP/1.0\\r\\n\\r\\n' >&3 && cat <&3 | head -1 | grep -q 200"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   # ── 007 MLflow tracking stack ────────────────────────────────────────────
   # MLflow server: backend store = a dedicated `mlflow` DB on the Postgres
   # service above; artifact store = MinIO (S3-compatible) under
@@ -127,7 +146,71 @@ services:
          --default-artifact-root s3://recsys-ops/mlflow/
       "
 
+  # ── Serving stack ─────────────────────────────────────────────────────────
+  # Triton Inference Server runs the ranking ensemble (id_mapper + item_pipeline
+  # + ranker ONNX) built by `models/ranking_sequence/convert2onnx_and_build_triton.py`.
+  # The model_repository is bind-mounted (regenerated locally, not baked in).
+  triton:
+    image: nvcr.io/nvidia/tritonserver:24.08-py3
+    container_name: recsys-triton
+    restart: unless-stopped
+    command: tritonserver --model-repository=/models --strict-model-config=false
+    ports:
+      - "8000:8000"   # HTTP
+      - "8001:8001"   # gRPC (api_gateway default TRITON_URL)
+      - "8002:8002"   # metrics
+    volumes:
+      - ./models/ranking_sequence/model_repository:/models:ro
+    shm_size: 1gb
+
+  # Feast Feature Store API — serves online features from Redis to the gateway.
+  # Built from feature/feature_store/feature_store_api.Dockerfile (repo root).
+  feast_api:
+    build:
+      context: .
+      dockerfile: feature/feature_store/feature_store_api.Dockerfile
+    container_name: recsys-feast-api
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    ports:
+      - "8010:8000"
+    volumes:
+      - ./feature/feature_store/feature_store.docker.yaml:/app/feature_store/feature_store.yaml:ro
+      - ./feature/output:/app/output:ro
+
+  # API Gateway — two-stage recommend (popular+similar -> Triton ranker).
+  # Built from api_gateway/Dockerfile (repo root). Connects to Triton gRPC
+  # (triton:8001), Feast API (feast_api:8000), Redis (redis:6379).
+  api_gateway:
+    build:
+      context: .
+      dockerfile: api_gateway/Dockerfile
+    container_name: recsys-api-gateway
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+      triton:
+        condition: service_started
+      feast_api:
+        condition: service_started
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      USER_FEATURE_URL: http://feast_api:8000/user_features
+      ITEM_FEATURE_URL: http://feast_api:8000/features_movie
+      TRITON_URL: triton:8001
+      MODEL_NAME: ensemble
+    ports:
+      - "8080:8000"
+
 volumes:
   postgres_data:
   minio_data:
   redis_data:
+  qdrant_data:
