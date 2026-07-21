@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# Pre-commit secret guard.
+# Blocks staged files containing real-looking secrets AND blocks `.env`-style
+# files from ever entering the repo. Self-contained: only needs git + grep.
+set -uo pipefail
+
+# ---- 1. Block .env (and similar) from being committed -----------------------
+blocked_env_files=$(
+  git diff --cached --name-only --diff-filter=ACMR |
+  while read -r f; do
+    case "$f" in
+      .env|.env.local|.env.production|.env.*.local|.env.*.secret) echo "$f" ;;
+    esac
+  done
+)
+if [ -n "$blocked_env_files" ]; then
+  echo "BLOCKED: secret/env file staged for commit:" >&2
+  echo "$blocked_env_files" >&2
+  echo "   .env files must stay local (see .gitignore). Use .env.example for the template." >&2
+  exit 1
+fi
+
+# ---- 2. Scan staged file contents for real secrets --------------------------
+# grep -E (extended regex) is bundled with Git Bash, so the hook works in
+# non-interactive shells where ripgrep may not be on PATH.
+secret_patterns='AKIA[0-9A-Z]{16}|aws_secret_access_key["'\'' ]*[:=]["'\'' ]*[A-Za-z0-9/+=]{30,}|KAGGLE_KEY["'\'' ]*[:=]["'\'' ]*[A-Za-z0-9_]{20,}|postgresql?://[^:]+:[^@]{6,}@[^"]+|PG_PASSWORD["'\'' ]*[:=]["'\'' ]*[A-Za-z0-9]{6,}|sk-[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|gh[pousr]_[A-Za-z0-9]{20,}|-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----'
+allowlist='admin|Password1234|postgres:postgres@localhost|CHANGE_ME|REPLACE_ME|your-|example|changeme|XXXX'
+
+found=""
+while IFS= read -r f; do
+  [ -n "$f" ] || continue
+  [ -f "$f" ] || continue
+  # Collect real-secret lines from staged content; drop allowlisted ones.
+  match=$(git show ":$f" 2>/dev/null | grep -nE "$secret_patterns" 2>/dev/null | while IFS= read -r line; do
+    if echo "$line" | grep -qiE "\$\{|$allowlist"; then continue; fi
+    echo "$f:$line"
+  done || true)
+  if [ -n "$match" ]; then
+    found="${found}${match}"$'\n'
+  fi
+done <<< "$(git diff --cached --name-only --diff-filter=ACMR)"
+
+if [ -n "$found" ]; then
+  echo "BLOCKED: suspected real secrets in staged files:" >&2
+  echo "$found" >&2
+  echo "   Move secrets to .env (gitignored). Use placeholders in tracked files." >&2
+  echo "   Bypass (NOT recommended): git commit --no-verify" >&2
+  exit 1
+fi
+
+echo "pre-commit: no secrets detected."
+exit 0

@@ -1,0 +1,14 @@
+# Watcher-pod image — polls MLflow for a new champion ranker and triggers Jenkins.
+#
+# Build + push (from repo root):
+#   docker build -t nmcuong08/recsys-model-watcher:v1 \
+#       -f infra/jenkins-stack/watcher-pod/Dockerfile.watcher .
+FROM python:3.11-slim
+
+WORKDIR /app
+
+RUN pip install --no-cache-dir mlflow==2.16.2 requests==2.32.3
+
+COPY infra/jenkins-stack/watcher-pod/watch_promotion.py /app/watch_promotion.py
+
+CMD ["python", "watch_promotion.py"]

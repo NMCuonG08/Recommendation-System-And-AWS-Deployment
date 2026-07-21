@@ -1,0 +1,28 @@
+# Jenkins controller image with docker + kubectl + helm + uv baked in.
+#
+# Ported from the reference Dockerfile.jenkins. Difference: drop miniconda +
+# the `datn` conda env — this port is uv-managed, so the Jenkinsfile runs
+# `uv sync --all-groups` against the repo's own pyproject.toml. uv is installed
+# here so the agent can sync deps without network conda channels.
+FROM jenkins/jenkins:lts-jdk17
+
+USER root
+
+# docker CLI (DinD / socket mount), kubectl, helm.
+RUN curl -fsSL https://get.docker.com > /tmp/dockerinstall && \
+    chmod +x /tmp/dockerinstall && /tmp/dockerinstall && \
+    curl -LO "https://storage.googleapis.com/kubernetes-release/release/$(curl -s https://storage.googleapis.com/kubernetes-release/release/stable.txt)/bin/linux/amd64/kubectl" && \
+    chmod +x ./kubectl && mv ./kubectl /usr/local/bin/kubectl && \
+    curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+# uv (matches repo tooling) for `uv sync --all-groups` + `uv run`.
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
+    ln -s /root/.local/bin/uv /usr/local/bin/uv
+
+# awscli for the S3 model-repo sync stage.
+RUN apt-get update && apt-get install -y --no-install-recommends awscli && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN usermod -aG docker jenkins
+
+USER jenkins

@@ -1,0 +1,5 @@
+apiVersion: v2
+name: jenkins-stack
+description: Jenkins for CI/CD (PVC + RBAC + Istio VS) on the serving EKS cluster. Lean port of the reference jenkins-stack chart.
+type: application
+version: 0.1.0

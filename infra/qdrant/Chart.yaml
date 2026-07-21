@@ -1,0 +1,9 @@
+apiVersion: v2
+name: qdrant
+description: Qdrant vector DB for Item2Vec embeddings (MovieLens retrieval stage). Lean port of the reference qdrant helm chart for free-tier EKS.
+icon: https://qdrant.github.io/qdrant-helm/logo_with_text.svg
+type: application
+appVersion: v1.12.4
+version: 0.1.0
+keywords:
+  - vector database

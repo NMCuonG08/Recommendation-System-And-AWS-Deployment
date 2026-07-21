@@ -1,0 +1,15 @@
+# Watcher has no inbound traffic — headless-less ClusterIP only so it shows
+# in `kubectl get svc`. Safe to omit; kept for parity with the reference.
+apiVersion: v1
+kind: Service
+metadata:
+  name: model-promotion-watcher
+  namespace: devops-tools
+spec:
+  selector:
+    app: model-promotion-watcher
+  ports:
+    - port: 80
+      targetPort: 80
+      name: placeholder
+  type: ClusterIP

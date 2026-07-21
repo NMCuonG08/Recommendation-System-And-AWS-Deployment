@@ -1,0 +1,33 @@
+# Jenkins helm values — free-tier EKS, gp3 dynamic PVC (no hostPath PV).
+# Ported from the reference jenkins-stack; differences:
+#   - storageClass gp3 (EBS CSI, created by infra/terraform_eks) instead of
+#     local-storage + hostPath PV (reference ran on a kind cluster).
+#   - image nmcuong08/recsys-jenkins (built from Dockerfile.jenkins).
+
+namespace: devops-tools
+
+jenkins:
+  image: nmcuong08/recsys-jenkins:v1
+  prefix: /jenkins
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "500Mi"
+    limits:
+      cpu: "1000m"
+      memory: "2Gi"
+  storage:
+    size: 3Gi
+
+storageClass:
+  name: gp3
+
+istio:
+  enabled: true
+  namespace: istio-system
+  gateway: kubeflow-gateway
+
+rbac:
+  saName: jenkins-admin
+  clusterRoleName: jenkins-admin
+  roleBindTo: cluster-admin

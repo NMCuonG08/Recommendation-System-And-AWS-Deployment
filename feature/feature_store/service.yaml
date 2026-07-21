@@ -1,0 +1,14 @@
+# Feast Feature Store API Service (serving cluster).
+apiVersion: v1
+kind: Service
+metadata:
+  name: feature-store-api-service
+  namespace: api-feature-store
+spec:
+  selector:
+    app: feature-store-api
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8000
+  type: ClusterIP

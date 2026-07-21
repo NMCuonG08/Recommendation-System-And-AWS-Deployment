@@ -1,0 +1,63 @@
+# KServe InferenceService running the Triton ranking ensemble on the serving
+# cluster.
+#
+# Ported from the reference `serving-cluster/inferenceservice-triton-gpu.yaml`,
+# adapted to this port:
+#   - CPU resources only (free-tier EKS, no GPU node group). Drop the GPU image
+#     tag suffix; image is the one built from Dockerfile.triton.
+#   - Model repository served from the in-cluster MinIO (S3-compatible) bucket
+#     `recsys-triton-repo`, synced by `aws s3 sync ./model_repository/ ...`.
+#     The MinIO creds come from the `minio-creds` Secret (same one the mlflow +
+#     ray charts create); KServe pulls them as env vars. Set S3 endpoint via
+#     AWS_ENDPOINT_URL so Triton talks to MinIO, not AWS S3.
+#   - MovieLens ensemble model name stays `ensemble` (matches the gateway env
+#     MODEL_NAME).
+#
+# Apply:
+#   kubectl apply -f infra/serving-cluster/inferenceservice-triton.yaml
+apiVersion: serving.kserve.io/v1beta1
+kind: InferenceService
+metadata:
+  name: recsys-triton
+  namespace: kserve
+spec:
+  predictor:
+    minReplicas: 1
+    maxReplicas: 2
+    containers:
+      - name: kserve-container
+        image: nmcuong08/recsys-triton:v1
+        imagePullPolicy: IfNotPresent
+        args:
+          - "--model-repository=s3://recsys-triton-repo/"
+          - "--log-verbose=2"
+        env:
+          - name: AWS_ACCESS_KEY_ID
+            valueFrom:
+              secretKeyRef:
+                name: minio-creds
+                key: accesskey
+          - name: AWS_SECRET_ACCESS_KEY
+            valueFrom:
+              secretKeyRef:
+                name: minio-creds
+                key: secretkey
+          - name: AWS_REGION
+            value: us-east-1
+          # MinIO (S3-compatible) endpoint inside the cluster.
+          - name: AWS_ENDPOINT_URL
+            value: http://minio-service.mlflow.svc.cluster.local:9000
+          - name: S3_USE_HTTPS
+            value: "0"
+          - name: S3_VERIFY_SSL
+            value: "0"
+        resources:
+          requests:
+            cpu: "1"
+            memory: 1Gi
+          limits:
+            cpu: "4"
+            memory: 8Gi
+        ports:
+          - name: h2c
+            containerPort: 8001

@@ -1,0 +1,18 @@
+# Triton Inference Server image with the Python-backend deps the
+# id_mapper + item_pipeline backends need.
+#
+# Ported from the reference `serving-cluster/Dockerfile.triton`. Difference:
+# this port's Python backends (models/ranking_sequence/model_repository/*/1/model.py)
+# load `id_mapper.json` + `item_metadata_pipeline.dill` from the model dir and
+# import nothing from `src/`, so we don't COPY src. The model repository is
+# mounted at runtime (local-pro) or pulled from S3 (EKS), not baked in.
+#
+# Build + push (from repo root):
+#   DOCKER_USER=nmcuong08 TAG=v1 bash infra/scripts/build_push_serving.sh
+FROM nvcr.io/nvidia/tritonserver:24.08-py3
+
+RUN pip install --no-cache-dir dill numpy pandas scikit-learn
+
+EXPOSE 8000 8001 8002
+
+ENTRYPOINT ["tritonserver"]

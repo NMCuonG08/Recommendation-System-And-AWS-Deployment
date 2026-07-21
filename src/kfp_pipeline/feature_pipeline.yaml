@@ -1,0 +1,545 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: recsys-feature-training-pipeline-
+  annotations: {pipelines.kubeflow.org/kfp_sdk_version: 1.4.0, pipelines.kubeflow.org/pipeline_compilation_time: '2026-07-17T12:28:42.272205',
+    pipelines.kubeflow.org/pipeline_spec: '{"description": "MovieLens: ETL -> features
+      -> neg-sampling + prep-item2vec -> train item2vec -> train ranking sequence
+      -> export ONNX + Triton repo", "name": "Recsys Feature + Training Pipeline"}'}
+  labels: {pipelines.kubeflow.org/kfp_sdk_version: 1.4.0}
+spec:
+  entrypoint: recsys-feature-training-pipeline
+  templates:
+  - name: convert-onnx-op
+    container:
+      args: [--output-path, /data/papermill-output/convert-onnx]
+      command:
+      - sh
+      - -ec
+      - |
+        program_path=$(mktemp)
+        printf "%s" "$0" > "$program_path"
+        python3 -u "$program_path" "$@"
+      - |
+        def convert_onnx_op(output_path):
+            """Export the ranker to ONNX and build the Triton model repository."""
+            import os
+            import subprocess
+            from pathlib import Path
+
+            Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+            print("Running module: models.ranking_sequence.convert2onnx_and_build_triton")
+            env = os.environ.copy()
+            env["PYTHONPATH"] = "/app"
+            subprocess.run(
+                ["uv", "run", "python", "-m", "models.ranking_sequence.convert2onnx_and_build_triton"],
+                check=True, cwd="/app", env=env,
+            )
+            return (output_path,)
+
+        import argparse
+        _parser = argparse.ArgumentParser(prog='Convert onnx op', description='Export the ranker to ONNX and build the Triton model repository.')
+        _parser.add_argument("--output-path", dest="output_path", type=str, required=True, default=argparse.SUPPRESS)
+        _parsed_args = vars(_parser.parse_args())
+
+        _outputs = convert_onnx_op(**_parsed_args)
+      env:
+      - {name: PVC_PATH, value: /data}
+      - name: AWS_ACCESS_KEY_ID
+        valueFrom:
+          secretKeyRef: {key: accesskey, name: minio-creds}
+      - name: AWS_SECRET_ACCESS_KEY
+        valueFrom:
+          secretKeyRef: {key: secretkey, name: minio-creds}
+      - {name: MLFLOW_TRACKING_URI, value: 'http://mlflow-tracking-service.mlflow.svc.cluster.local:5000'}
+      - {name: MLFLOW_S3_ENDPOINT_URL, value: 'http://minio-service.mlflow.svc.cluster.local:9000'}
+      - {name: AWS_DEFAULT_REGION, value: us-east-1}
+      - {name: RAY_ADDRESS, value: local}
+      image: nmcuong08/recsys-ray:v1
+      resources:
+        requests: {memory: 2Gi}
+      volumeMounts:
+      - {mountPath: /data, name: pvolume-903302ac6190f12f89cd550b03020463ac7bcfe6ec82089db2d3cc7}
+    metadata:
+      annotations: {debug/mount-path: /data, pipelines.kubeflow.org/component_spec: '{"description":
+          "Export the ranker to ONNX and build the Triton model repository.", "implementation":
+          {"container": {"args": ["--output-path", {"inputValue": "output_path"}],
+          "command": ["sh", "-ec", "program_path=$(mktemp)\nprintf \"%s\" \"$0\" >
+          \"$program_path\"\npython3 -u \"$program_path\" \"$@\"\n", "def convert_onnx_op(output_path):\n    \"\"\"Export
+          the ranker to ONNX and build the Triton model repository.\"\"\"\n    import
+          os\n    import subprocess\n    from pathlib import Path\n\n    Path(output_path).parent.mkdir(parents=True,
+          exist_ok=True)\n    print(\"Running module: models.ranking_sequence.convert2onnx_and_build_triton\")\n    env
+          = os.environ.copy()\n    env[\"PYTHONPATH\"] = \"/app\"\n    subprocess.run(\n        [\"uv\",
+          \"run\", \"python\", \"-m\", \"models.ranking_sequence.convert2onnx_and_build_triton\"],\n        check=True,
+          cwd=\"/app\", env=env,\n    )\n    return (output_path,)\n\nimport argparse\n_parser
+          = argparse.ArgumentParser(prog=''Convert onnx op'', description=''Export
+          the ranker to ONNX and build the Triton model repository.'')\n_parser.add_argument(\"--output-path\",
+          dest=\"output_path\", type=str, required=True, default=argparse.SUPPRESS)\n_parsed_args
+          = vars(_parser.parse_args())\n\n_outputs = convert_onnx_op(**_parsed_args)\n"],
+          "image": "nmcuong08/recsys-ray:v1"}}, "inputs": [{"name": "output_path",
+          "type": "str"}], "name": "Convert onnx op"}', pipelines.kubeflow.org/component_ref: '{}',
+        pipelines.kubeflow.org/arguments.parameters: '{"output_path": "/data/papermill-output/convert-onnx"}',
+        pipelines.kubeflow.org/max_cache_staleness: P0D}
+    volumes:
+    - name: pvolume-903302ac6190f12f89cd550b03020463ac7bcfe6ec82089db2d3cc7
+      persistentVolumeClaim: {claimName: data-pvc}
+  - name: feature-engineer-op
+    container:
+      args: [--output-path, /data/papermill-output/004-features.ipynb]
+      command:
+      - sh
+      - -ec
+      - |
+        program_path=$(mktemp)
+        printf "%s" "$0" > "$program_path"
+        python3 -u "$program_path" "$@"
+      - |
+        def feature_engineer_op(output_path):
+            """Papermill-execute the feature-engineering notebook."""
+            import os
+            import subprocess
+            import sys
+            from pathlib import Path
+
+            Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+            nb_path = "/app/feature/engineer/004-features.ipynb"
+            print(f"Papermill-executing {nb_path} -> {output_path}")
+            if not os.path.exists(nb_path):
+                print(f"Error: notebook not found at {nb_path}", file=sys.stderr)
+                sys.exit(1)
+            subprocess.run(["uv", "run", "papermill", nb_path, output_path], check=True, cwd="/app")
+            return (output_path,)
+
+        import argparse
+        _parser = argparse.ArgumentParser(prog='Feature engineer op', description='Papermill-execute the feature-engineering notebook.')
+        _parser.add_argument("--output-path", dest="output_path", type=str, required=True, default=argparse.SUPPRESS)
+        _parsed_args = vars(_parser.parse_args())
+
+        _outputs = feature_engineer_op(**_parsed_args)
+      env:
+      - {name: PVC_PATH, value: /data}
+      - name: AWS_ACCESS_KEY_ID
+        valueFrom:
+          secretKeyRef: {key: accesskey, name: minio-creds}
+      - name: AWS_SECRET_ACCESS_KEY
+        valueFrom:
+          secretKeyRef: {key: secretkey, name: minio-creds}
+      - {name: MLFLOW_TRACKING_URI, value: 'http://mlflow-tracking-service.mlflow.svc.cluster.local:5000'}
+      - {name: MLFLOW_S3_ENDPOINT_URL, value: 'http://minio-service.mlflow.svc.cluster.local:9000'}
+      - {name: AWS_DEFAULT_REGION, value: us-east-1}
+      - {name: RAY_ADDRESS, value: local}
+      image: nmcuong08/recsys-ray:v1
+      resources:
+        requests: {memory: 2Gi}
+      volumeMounts:
+      - {mountPath: /data, name: pvolume-903302ac6190f12f89cd550b03020463ac7bcfe6ec82089db2d3cc7}
+    metadata:
+      annotations: {debug/mount-path: /data, pipelines.kubeflow.org/component_spec: '{"description":
+          "Papermill-execute the feature-engineering notebook.", "implementation":
+          {"container": {"args": ["--output-path", {"inputValue": "output_path"}],
+          "command": ["sh", "-ec", "program_path=$(mktemp)\nprintf \"%s\" \"$0\" >
+          \"$program_path\"\npython3 -u \"$program_path\" \"$@\"\n", "def feature_engineer_op(output_path):\n    \"\"\"Papermill-execute
+          the feature-engineering notebook.\"\"\"\n    import os\n    import subprocess\n    import
+          sys\n    from pathlib import Path\n\n    Path(output_path).parent.mkdir(parents=True,
+          exist_ok=True)\n    nb_path = \"/app/feature/engineer/004-features.ipynb\"\n    print(f\"Papermill-executing
+          {nb_path} -> {output_path}\")\n    if not os.path.exists(nb_path):\n        print(f\"Error:
+          notebook not found at {nb_path}\", file=sys.stderr)\n        sys.exit(1)\n    subprocess.run([\"uv\",
+          \"run\", \"papermill\", nb_path, output_path], check=True, cwd=\"/app\")\n    return
+          (output_path,)\n\nimport argparse\n_parser = argparse.ArgumentParser(prog=''Feature
+          engineer op'', description=''Papermill-execute the feature-engineering notebook.'')\n_parser.add_argument(\"--output-path\",
+          dest=\"output_path\", type=str, required=True, default=argparse.SUPPRESS)\n_parsed_args
+          = vars(_parser.parse_args())\n\n_outputs = feature_engineer_op(**_parsed_args)\n"],
+          "image": "nmcuong08/recsys-ray:v1"}}, "inputs": [{"name": "output_path",
+          "type": "str"}], "name": "Feature engineer op"}', pipelines.kubeflow.org/component_ref: '{}',
+        pipelines.kubeflow.org/arguments.parameters: '{"output_path": "/data/papermill-output/004-features.ipynb"}',
+        pipelines.kubeflow.org/max_cache_staleness: P0D}
+    volumes:
+    - name: pvolume-903302ac6190f12f89cd550b03020463ac7bcfe6ec82089db2d3cc7
+      persistentVolumeClaim: {claimName: data-pvc}
+  - name: feature-etl-op
+    container:
+      args: [--output-path, /data/papermill-output/003-feature-etl.ipynb]
+      command:
+      - sh
+      - -ec
+      - |
+        program_path=$(mktemp)
+        printf "%s" "$0" > "$program_path"
+        python3 -u "$program_path" "$@"
+      - |
+        def feature_etl_op(output_path):
+            """Papermill-execute the feature ETL notebook."""
+            import os
+            import subprocess
+            import sys
+            from pathlib import Path
+
+            Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+            nb_path = "/app/feature/etl/003-feature-etl.ipynb"
+            print(f"Papermill-executing {nb_path} -> {output_path}")
+            if not os.path.exists(nb_path):
+                print(f"Error: notebook not found at {nb_path}", file=sys.stderr)
+                sys.exit(1)
+            subprocess.run(["uv", "run", "papermill", nb_path, output_path], check=True, cwd="/app")
+            return (output_path,)
+
+        import argparse
+        _parser = argparse.ArgumentParser(prog='Feature etl op', description='Papermill-execute the feature ETL notebook.')
+        _parser.add_argument("--output-path", dest="output_path", type=str, required=True, default=argparse.SUPPRESS)
+        _parsed_args = vars(_parser.parse_args())
+
+        _outputs = feature_etl_op(**_parsed_args)
+      env:
+      - {name: PVC_PATH, value: /data}
+      - name: AWS_ACCESS_KEY_ID
+        valueFrom:
+          secretKeyRef: {key: accesskey, name: minio-creds}
+      - name: AWS_SECRET_ACCESS_KEY
+        valueFrom:
+          secretKeyRef: {key: secretkey, name: minio-creds}
+      - {name: MLFLOW_TRACKING_URI, value: 'http://mlflow-tracking-service.mlflow.svc.cluster.local:5000'}
+      - {name: MLFLOW_S3_ENDPOINT_URL, value: 'http://minio-service.mlflow.svc.cluster.local:9000'}
+      - {name: AWS_DEFAULT_REGION, value: us-east-1}
+      - {name: RAY_ADDRESS, value: local}
+      image: nmcuong08/recsys-ray:v1
+      resources:
+        requests: {memory: 2Gi}
+      volumeMounts:
+      - {mountPath: /data, name: pvolume-903302ac6190f12f89cd550b03020463ac7bcfe6ec82089db2d3cc7}
+    metadata:
+      annotations: {debug/mount-path: /data, pipelines.kubeflow.org/component_spec: '{"description":
+          "Papermill-execute the feature ETL notebook.", "implementation": {"container":
+          {"args": ["--output-path", {"inputValue": "output_path"}], "command": ["sh",
+          "-ec", "program_path=$(mktemp)\nprintf \"%s\" \"$0\" > \"$program_path\"\npython3
+          -u \"$program_path\" \"$@\"\n", "def feature_etl_op(output_path):\n    \"\"\"Papermill-execute
+          the feature ETL notebook.\"\"\"\n    import os\n    import subprocess\n    import
+          sys\n    from pathlib import Path\n\n    Path(output_path).parent.mkdir(parents=True,
+          exist_ok=True)\n    nb_path = \"/app/feature/etl/003-feature-etl.ipynb\"\n    print(f\"Papermill-executing
+          {nb_path} -> {output_path}\")\n    if not os.path.exists(nb_path):\n        print(f\"Error:
+          notebook not found at {nb_path}\", file=sys.stderr)\n        sys.exit(1)\n    subprocess.run([\"uv\",
+          \"run\", \"papermill\", nb_path, output_path], check=True, cwd=\"/app\")\n    return
+          (output_path,)\n\nimport argparse\n_parser = argparse.ArgumentParser(prog=''Feature
+          etl op'', description=''Papermill-execute the feature ETL notebook.'')\n_parser.add_argument(\"--output-path\",
+          dest=\"output_path\", type=str, required=True, default=argparse.SUPPRESS)\n_parsed_args
+          = vars(_parser.parse_args())\n\n_outputs = feature_etl_op(**_parsed_args)\n"],
+          "image": "nmcuong08/recsys-ray:v1"}}, "inputs": [{"name": "output_path",
+          "type": "str"}], "name": "Feature etl op"}', pipelines.kubeflow.org/component_ref: '{}',
+        pipelines.kubeflow.org/arguments.parameters: '{"output_path": "/data/papermill-output/003-feature-etl.ipynb"}',
+        pipelines.kubeflow.org/max_cache_staleness: P0D}
+    volumes:
+    - name: pvolume-903302ac6190f12f89cd550b03020463ac7bcfe6ec82089db2d3cc7
+      persistentVolumeClaim: {claimName: data-pvc}
+  - name: negative-sampling-op
+    container:
+      args: [--output-path, /data/papermill-output/005-negative-sample.ipynb]
+      command:
+      - sh
+      - -ec
+      - |
+        program_path=$(mktemp)
+        printf "%s" "$0" > "$program_path"
+        python3 -u "$program_path" "$@"
+      - |
+        def negative_sampling_op(output_path):
+            """Papermill-execute the negative-sampling notebook."""
+            import os
+            import subprocess
+            import sys
+            from pathlib import Path
+
+            Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+            nb_path = "/app/feature/engineer/005-negative-sample.ipynb"
+            print(f"Papermill-executing {nb_path} -> {output_path}")
+            if not os.path.exists(nb_path):
+                print(f"Error: notebook not found at {nb_path}", file=sys.stderr)
+                sys.exit(1)
+            subprocess.run(["uv", "run", "papermill", nb_path, output_path], check=True, cwd="/app")
+            return (output_path,)
+
+        import argparse
+        _parser = argparse.ArgumentParser(prog='Negative sampling op', description='Papermill-execute the negative-sampling notebook.')
+        _parser.add_argument("--output-path", dest="output_path", type=str, required=True, default=argparse.SUPPRESS)
+        _parsed_args = vars(_parser.parse_args())
+
+        _outputs = negative_sampling_op(**_parsed_args)
+      env:
+      - {name: PVC_PATH, value: /data}
+      - name: AWS_ACCESS_KEY_ID
+        valueFrom:
+          secretKeyRef: {key: accesskey, name: minio-creds}
+      - name: AWS_SECRET_ACCESS_KEY
+        valueFrom:
+          secretKeyRef: {key: secretkey, name: minio-creds}
+      - {name: MLFLOW_TRACKING_URI, value: 'http://mlflow-tracking-service.mlflow.svc.cluster.local:5000'}
+      - {name: MLFLOW_S3_ENDPOINT_URL, value: 'http://minio-service.mlflow.svc.cluster.local:9000'}
+      - {name: AWS_DEFAULT_REGION, value: us-east-1}
+      - {name: RAY_ADDRESS, value: local}
+      image: nmcuong08/recsys-ray:v1
+      resources:
+        requests: {memory: 2Gi}
+      volumeMounts:
+      - {mountPath: /data, name: pvolume-903302ac6190f12f89cd550b03020463ac7bcfe6ec82089db2d3cc7}
+    metadata:
+      annotations: {debug/mount-path: /data, pipelines.kubeflow.org/component_spec: '{"description":
+          "Papermill-execute the negative-sampling notebook.", "implementation": {"container":
+          {"args": ["--output-path", {"inputValue": "output_path"}], "command": ["sh",
+          "-ec", "program_path=$(mktemp)\nprintf \"%s\" \"$0\" > \"$program_path\"\npython3
+          -u \"$program_path\" \"$@\"\n", "def negative_sampling_op(output_path):\n    \"\"\"Papermill-execute
+          the negative-sampling notebook.\"\"\"\n    import os\n    import subprocess\n    import
+          sys\n    from pathlib import Path\n\n    Path(output_path).parent.mkdir(parents=True,
+          exist_ok=True)\n    nb_path = \"/app/feature/engineer/005-negative-sample.ipynb\"\n    print(f\"Papermill-executing
+          {nb_path} -> {output_path}\")\n    if not os.path.exists(nb_path):\n        print(f\"Error:
+          notebook not found at {nb_path}\", file=sys.stderr)\n        sys.exit(1)\n    subprocess.run([\"uv\",
+          \"run\", \"papermill\", nb_path, output_path], check=True, cwd=\"/app\")\n    return
+          (output_path,)\n\nimport argparse\n_parser = argparse.ArgumentParser(prog=''Negative
+          sampling op'', description=''Papermill-execute the negative-sampling notebook.'')\n_parser.add_argument(\"--output-path\",
+          dest=\"output_path\", type=str, required=True, default=argparse.SUPPRESS)\n_parsed_args
+          = vars(_parser.parse_args())\n\n_outputs = negative_sampling_op(**_parsed_args)\n"],
+          "image": "nmcuong08/recsys-ray:v1"}}, "inputs": [{"name": "output_path",
+          "type": "str"}], "name": "Negative sampling op"}', pipelines.kubeflow.org/component_ref: '{}',
+        pipelines.kubeflow.org/arguments.parameters: '{"output_path": "/data/papermill-output/005-negative-sample.ipynb"}',
+        pipelines.kubeflow.org/max_cache_staleness: P0D}
+    volumes:
+    - name: pvolume-903302ac6190f12f89cd550b03020463ac7bcfe6ec82089db2d3cc7
+      persistentVolumeClaim: {claimName: data-pvc}
+  - name: prep-item2vec-op
+    container:
+      args: [--output-path, /data/papermill-output/006-prep-item2vec.ipynb]
+      command:
+      - sh
+      - -ec
+      - |
+        program_path=$(mktemp)
+        printf "%s" "$0" > "$program_path"
+        python3 -u "$program_path" "$@"
+      - |
+        def prep_item2vec_op(output_path):
+            """Papermill-execute the item2vec-prep notebook."""
+            import os
+            import subprocess
+            import sys
+            from pathlib import Path
+
+            Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+            nb_path = "/app/feature/engineer/006-prep-item2vec.ipynb"
+            print(f"Papermill-executing {nb_path} -> {output_path}")
+            if not os.path.exists(nb_path):
+                print(f"Error: notebook not found at {nb_path}", file=sys.stderr)
+                sys.exit(1)
+            subprocess.run(["uv", "run", "papermill", nb_path, output_path], check=True, cwd="/app")
+            return (output_path,)
+
+        import argparse
+        _parser = argparse.ArgumentParser(prog='Prep item2vec op', description='Papermill-execute the item2vec-prep notebook.')
+        _parser.add_argument("--output-path", dest="output_path", type=str, required=True, default=argparse.SUPPRESS)
+        _parsed_args = vars(_parser.parse_args())
+
+        _outputs = prep_item2vec_op(**_parsed_args)
+      env:
+      - {name: PVC_PATH, value: /data}
+      - name: AWS_ACCESS_KEY_ID
+        valueFrom:
+          secretKeyRef: {key: accesskey, name: minio-creds}
+      - name: AWS_SECRET_ACCESS_KEY
+        valueFrom:
+          secretKeyRef: {key: secretkey, name: minio-creds}
+      - {name: MLFLOW_TRACKING_URI, value: 'http://mlflow-tracking-service.mlflow.svc.cluster.local:5000'}
+      - {name: MLFLOW_S3_ENDPOINT_URL, value: 'http://minio-service.mlflow.svc.cluster.local:9000'}
+      - {name: AWS_DEFAULT_REGION, value: us-east-1}
+      - {name: RAY_ADDRESS, value: local}
+      image: nmcuong08/recsys-ray:v1
+      resources:
+        requests: {memory: 2Gi}
+      volumeMounts:
+      - {mountPath: /data, name: pvolume-903302ac6190f12f89cd550b03020463ac7bcfe6ec82089db2d3cc7}
+    metadata:
+      annotations: {debug/mount-path: /data, pipelines.kubeflow.org/component_spec: '{"description":
+          "Papermill-execute the item2vec-prep notebook.", "implementation": {"container":
+          {"args": ["--output-path", {"inputValue": "output_path"}], "command": ["sh",
+          "-ec", "program_path=$(mktemp)\nprintf \"%s\" \"$0\" > \"$program_path\"\npython3
+          -u \"$program_path\" \"$@\"\n", "def prep_item2vec_op(output_path):\n    \"\"\"Papermill-execute
+          the item2vec-prep notebook.\"\"\"\n    import os\n    import subprocess\n    import
+          sys\n    from pathlib import Path\n\n    Path(output_path).parent.mkdir(parents=True,
+          exist_ok=True)\n    nb_path = \"/app/feature/engineer/006-prep-item2vec.ipynb\"\n    print(f\"Papermill-executing
+          {nb_path} -> {output_path}\")\n    if not os.path.exists(nb_path):\n        print(f\"Error:
+          notebook not found at {nb_path}\", file=sys.stderr)\n        sys.exit(1)\n    subprocess.run([\"uv\",
+          \"run\", \"papermill\", nb_path, output_path], check=True, cwd=\"/app\")\n    return
+          (output_path,)\n\nimport argparse\n_parser = argparse.ArgumentParser(prog=''Prep
+          item2vec op'', description=''Papermill-execute the item2vec-prep notebook.'')\n_parser.add_argument(\"--output-path\",
+          dest=\"output_path\", type=str, required=True, default=argparse.SUPPRESS)\n_parsed_args
+          = vars(_parser.parse_args())\n\n_outputs = prep_item2vec_op(**_parsed_args)\n"],
+          "image": "nmcuong08/recsys-ray:v1"}}, "inputs": [{"name": "output_path",
+          "type": "str"}], "name": "Prep item2vec op"}', pipelines.kubeflow.org/component_ref: '{}',
+        pipelines.kubeflow.org/arguments.parameters: '{"output_path": "/data/papermill-output/006-prep-item2vec.ipynb"}',
+        pipelines.kubeflow.org/max_cache_staleness: P0D}
+    volumes:
+    - name: pvolume-903302ac6190f12f89cd550b03020463ac7bcfe6ec82089db2d3cc7
+      persistentVolumeClaim: {claimName: data-pvc}
+  - name: recsys-feature-training-pipeline
+    dag:
+      tasks:
+      - name: convert-onnx-op
+        template: convert-onnx-op
+        dependencies: [train-ranking-sequence-op]
+      - name: feature-engineer-op
+        template: feature-engineer-op
+        dependencies: [feature-etl-op]
+      - {name: feature-etl-op, template: feature-etl-op}
+      - name: negative-sampling-op
+        template: negative-sampling-op
+        dependencies: [feature-engineer-op]
+      - name: prep-item2vec-op
+        template: prep-item2vec-op
+        dependencies: [feature-engineer-op]
+      - name: train-item2vec-op
+        template: train-item2vec-op
+        dependencies: [prep-item2vec-op]
+      - name: train-ranking-sequence-op
+        template: train-ranking-sequence-op
+        dependencies: [negative-sampling-op, train-item2vec-op]
+  - name: train-item2vec-op
+    container:
+      args: [--output-path, /data/papermill-output/train-item2vec]
+      command:
+      - sh
+      - -ec
+      - |
+        program_path=$(mktemp)
+        printf "%s" "$0" > "$program_path"
+        python3 -u "$program_path" "$@"
+      - |
+        def train_item2vec_op(output_path):
+            """Train the Item2Vec model (Ray Train + MLflow)."""
+            import os
+            import subprocess
+            from pathlib import Path
+
+            Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+            print("Running module: models.item2vec.train")
+            env = os.environ.copy()
+            env["PYTHONPATH"] = "/app"
+            subprocess.run(["uv", "run", "python", "-m", "models.item2vec.train"],
+                           check=True, cwd="/app", env=env)
+            return (output_path,)
+
+        import argparse
+        _parser = argparse.ArgumentParser(prog='Train item2vec op', description='Train the Item2Vec model (Ray Train + MLflow).')
+        _parser.add_argument("--output-path", dest="output_path", type=str, required=True, default=argparse.SUPPRESS)
+        _parsed_args = vars(_parser.parse_args())
+
+        _outputs = train_item2vec_op(**_parsed_args)
+      env:
+      - {name: PVC_PATH, value: /data}
+      - name: AWS_ACCESS_KEY_ID
+        valueFrom:
+          secretKeyRef: {key: accesskey, name: minio-creds}
+      - name: AWS_SECRET_ACCESS_KEY
+        valueFrom:
+          secretKeyRef: {key: secretkey, name: minio-creds}
+      - {name: MLFLOW_TRACKING_URI, value: 'http://mlflow-tracking-service.mlflow.svc.cluster.local:5000'}
+      - {name: MLFLOW_S3_ENDPOINT_URL, value: 'http://minio-service.mlflow.svc.cluster.local:9000'}
+      - {name: AWS_DEFAULT_REGION, value: us-east-1}
+      - {name: RAY_ADDRESS, value: local}
+      image: nmcuong08/recsys-ray:v1
+      resources:
+        requests: {memory: 2Gi}
+      volumeMounts:
+      - {mountPath: /data, name: pvolume-903302ac6190f12f89cd550b03020463ac7bcfe6ec82089db2d3cc7}
+    metadata:
+      annotations: {debug/mount-path: /data, pipelines.kubeflow.org/component_spec: '{"description":
+          "Train the Item2Vec model (Ray Train + MLflow).", "implementation": {"container":
+          {"args": ["--output-path", {"inputValue": "output_path"}], "command": ["sh",
+          "-ec", "program_path=$(mktemp)\nprintf \"%s\" \"$0\" > \"$program_path\"\npython3
+          -u \"$program_path\" \"$@\"\n", "def train_item2vec_op(output_path):\n    \"\"\"Train
+          the Item2Vec model (Ray Train + MLflow).\"\"\"\n    import os\n    import
+          subprocess\n    from pathlib import Path\n\n    Path(output_path).parent.mkdir(parents=True,
+          exist_ok=True)\n    print(\"Running module: models.item2vec.train\")\n    env
+          = os.environ.copy()\n    env[\"PYTHONPATH\"] = \"/app\"\n    subprocess.run([\"uv\",
+          \"run\", \"python\", \"-m\", \"models.item2vec.train\"],\n                   check=True,
+          cwd=\"/app\", env=env)\n    return (output_path,)\n\nimport argparse\n_parser
+          = argparse.ArgumentParser(prog=''Train item2vec op'', description=''Train
+          the Item2Vec model (Ray Train + MLflow).'')\n_parser.add_argument(\"--output-path\",
+          dest=\"output_path\", type=str, required=True, default=argparse.SUPPRESS)\n_parsed_args
+          = vars(_parser.parse_args())\n\n_outputs = train_item2vec_op(**_parsed_args)\n"],
+          "image": "nmcuong08/recsys-ray:v1"}}, "inputs": [{"name": "output_path",
+          "type": "str"}], "name": "Train item2vec op"}', pipelines.kubeflow.org/component_ref: '{}',
+        pipelines.kubeflow.org/arguments.parameters: '{"output_path": "/data/papermill-output/train-item2vec"}',
+        pipelines.kubeflow.org/max_cache_staleness: P0D}
+    volumes:
+    - name: pvolume-903302ac6190f12f89cd550b03020463ac7bcfe6ec82089db2d3cc7
+      persistentVolumeClaim: {claimName: data-pvc}
+  - name: train-ranking-sequence-op
+    container:
+      args: [--output-path, /data/papermill-output/train-ranking_sequence]
+      command:
+      - sh
+      - -ec
+      - |
+        program_path=$(mktemp)
+        printf "%s" "$0" > "$program_path"
+        python3 -u "$program_path" "$@"
+      - |
+        def train_ranking_sequence_op(output_path):
+            """Train the GRU ranking sequence model (frozen item2vec emb + MLflow)."""
+            import os
+            import subprocess
+            from pathlib import Path
+
+            Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+            print("Running module: models.ranking_sequence.train")
+            env = os.environ.copy()
+            env["PYTHONPATH"] = "/app"
+            subprocess.run(["uv", "run", "python", "-m", "models.ranking_sequence.train"],
+                           check=True, cwd="/app", env=env)
+            return (output_path,)
+
+        import argparse
+        _parser = argparse.ArgumentParser(prog='Train ranking sequence op', description='Train the GRU ranking sequence model (frozen item2vec emb + MLflow).')
+        _parser.add_argument("--output-path", dest="output_path", type=str, required=True, default=argparse.SUPPRESS)
+        _parsed_args = vars(_parser.parse_args())
+
+        _outputs = train_ranking_sequence_op(**_parsed_args)
+      env:
+      - {name: PVC_PATH, value: /data}
+      - name: AWS_ACCESS_KEY_ID
+        valueFrom:
+          secretKeyRef: {key: accesskey, name: minio-creds}
+      - name: AWS_SECRET_ACCESS_KEY
+        valueFrom:
+          secretKeyRef: {key: secretkey, name: minio-creds}
+      - {name: MLFLOW_TRACKING_URI, value: 'http://mlflow-tracking-service.mlflow.svc.cluster.local:5000'}
+      - {name: MLFLOW_S3_ENDPOINT_URL, value: 'http://minio-service.mlflow.svc.cluster.local:9000'}
+      - {name: AWS_DEFAULT_REGION, value: us-east-1}
+      - {name: RAY_ADDRESS, value: local}
+      image: nmcuong08/recsys-ray:v1
+      resources:
+        requests: {memory: 2Gi}
+      volumeMounts:
+      - {mountPath: /data, name: pvolume-903302ac6190f12f89cd550b03020463ac7bcfe6ec82089db2d3cc7}
+    metadata:
+      annotations: {debug/mount-path: /data, pipelines.kubeflow.org/component_spec: '{"description":
+          "Train the GRU ranking sequence model (frozen item2vec emb + MLflow).",
+          "implementation": {"container": {"args": ["--output-path", {"inputValue":
+          "output_path"}], "command": ["sh", "-ec", "program_path=$(mktemp)\nprintf
+          \"%s\" \"$0\" > \"$program_path\"\npython3 -u \"$program_path\" \"$@\"\n",
+          "def train_ranking_sequence_op(output_path):\n    \"\"\"Train the GRU ranking
+          sequence model (frozen item2vec emb + MLflow).\"\"\"\n    import os\n    import
+          subprocess\n    from pathlib import Path\n\n    Path(output_path).parent.mkdir(parents=True,
+          exist_ok=True)\n    print(\"Running module: models.ranking_sequence.train\")\n    env
+          = os.environ.copy()\n    env[\"PYTHONPATH\"] = \"/app\"\n    subprocess.run([\"uv\",
+          \"run\", \"python\", \"-m\", \"models.ranking_sequence.train\"],\n                   check=True,
+          cwd=\"/app\", env=env)\n    return (output_path,)\n\nimport argparse\n_parser
+          = argparse.ArgumentParser(prog=''Train ranking sequence op'', description=''Train
+          the GRU ranking sequence model (frozen item2vec emb + MLflow).'')\n_parser.add_argument(\"--output-path\",
+          dest=\"output_path\", type=str, required=True, default=argparse.SUPPRESS)\n_parsed_args
+          = vars(_parser.parse_args())\n\n_outputs = train_ranking_sequence_op(**_parsed_args)\n"],
+          "image": "nmcuong08/recsys-ray:v1"}}, "inputs": [{"name": "output_path",
+          "type": "str"}], "name": "Train ranking sequence op"}', pipelines.kubeflow.org/component_ref: '{}',
+        pipelines.kubeflow.org/arguments.parameters: '{"output_path": "/data/papermill-output/train-ranking_sequence"}',
+        pipelines.kubeflow.org/max_cache_staleness: P0D}
+    volumes:
+    - name: pvolume-903302ac6190f12f89cd550b03020463ac7bcfe6ec82089db2d3cc7
+      persistentVolumeClaim: {claimName: data-pvc}
+  arguments:
+    parameters: []
+  serviceAccountName: pipeline-runner

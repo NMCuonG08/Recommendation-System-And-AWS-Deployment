@@ -1,0 +1,47 @@
+# Watcher pod — poll MLflow, trigger Jenkins deploy on new champion.
+# Apply with: kubectl apply -f infra/jenkins-stack/watcher-pod/
+# JENKINS_TOKEN must be set via the jenkins-creds Secret (no default, no leak).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: model-promotion-watcher
+  namespace: devops-tools
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: model-promotion-watcher
+  template:
+    metadata:
+      labels:
+        app: model-promotion-watcher
+    spec:
+      containers:
+        - name: watcher
+          image: nmcuong08/recsys-model-watcher:v1
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: MLFLOW_TRACKING_URI
+              value: "http://mlflow-tracking-service.mlflow.svc.cluster.local:5000"
+            - name: MODEL_NAME
+              value: "ranking_sequence_rating"
+            - name: CHAMPION_TAG_KEY
+              value: "champion"
+            - name: JENKINS_BASE
+              value: "http://jenkins-service.devops-tools.svc.cluster.local:8080/jenkins"
+            - name: JENKINS_JOB
+              value: "pipeline_deploy_triton"
+            - name: JENKINS_USER
+              value: "admin"
+            - name: JENKINS_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: jenkins-creds
+                  key: jenkins-token
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi

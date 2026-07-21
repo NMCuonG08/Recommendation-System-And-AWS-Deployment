@@ -1,0 +1,54 @@
+# API Gateway Deployment (serving cluster).
+# Mirrors the reference api_gateway/deployment.yaml; env vars point at the
+# in-cluster Feast API, Redis, and the KServe Triton predictor.
+#
+# Image built from api_gateway/Dockerfile (repo-root context); push via
+# infra/scripts/build_push_serving.sh. Namespace created by kubectl apply -f
+# with --namespace or via `kubectl create ns api-gateway`.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-gateway
+  namespace: api-gateway
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: api-gateway
+  template:
+    metadata:
+      labels:
+        app: api-gateway
+    spec:
+      containers:
+        - name: api-gateway
+          image: nmcuong08/recsys-api-gateway:v1
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+          env:
+            - name: REDIS_HOST
+              value: "redis-master.cache.svc.cluster.local"
+            - name: REDIS_PORT
+              value: "6379"
+            - name: REDIS_PASSWORD
+              value: "123456"
+            - name: USER_FEATURE_URL
+              value: "http://feature-store-api-service.api-feature-store.svc.cluster.local/user_features"
+            - name: ITEM_FEATURE_URL
+              value: "http://feature-store-api-service.api-feature-store.svc.cluster.local/features_movie"
+            - name: TRITON_URL
+              value: "recsys-triton-predictor.kserve.svc.cluster.local:80"
+            - name: MODEL_NAME
+              value: "ensemble"
+            - name: SEQ_LEN
+              value: "10"
+            - name: MAX_ITEM_ID_LEN
+              value: "1"
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "500m"
+            limits:
+              memory: "2Gi"
+              cpu: "2000m"

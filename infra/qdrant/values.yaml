@@ -1,0 +1,55 @@
+# Qdrant helm values — single replica, free-tier EKS.
+# Lean port of the reference qdrant chart: keeps StatefulSet + headless Service +
+# ConfigMap + ServiceAccount. Drops ingress/PDB/serviceMonitor/snapshot/cluster
+# bits the free-tier single-node deploy does not need.
+
+replicaCount: 1
+
+image:
+  repository: docker.io/qdrant/qdrant
+  pullPolicy: IfNotPresent
+  tag: "v1.12.4"
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+service:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 6333
+      targetPort: 6333
+      protocol: TCP
+    - name: grpc
+      port: 6334
+      targetPort: 6334
+      protocol: TCP
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 1Gi
+
+persistence:
+  storageClassName: gp3
+  accessModes: ["ReadWriteOnce"]
+  size: 5Gi
+
+# Qdrant config rendered into the production.yaml ConfigMap.
+config:
+  service:
+    max_workers: 2
+  storage:
+    storage_path: /qdrant/storage
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+serviceAccount:
+  create: true
+  annotations: {}

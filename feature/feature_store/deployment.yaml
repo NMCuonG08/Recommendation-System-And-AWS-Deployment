@@ -1,0 +1,43 @@
+# Feast Feature Store API Deployment (serving cluster).
+# Mirrors the reference feature_store/deployment.yaml; serves online features
+# from Redis to the API Gateway.
+#
+# Image built from feature/feature_store/feature_store_api.Dockerfile (repo-root
+# context); push via infra/scripts/build_push_serving.sh. AWS creds come from
+# the aws-credentials Secret (MinIO/Redis creds as needed).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: feature-store-api
+  namespace: api-feature-store
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: feature-store-api
+  template:
+    metadata:
+      labels:
+        app: feature-store-api
+    spec:
+      containers:
+        - name: feature-store-api
+          image: nmcuong08/recsys-feature-store-api:v1
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+          env:
+            - name: REDIS_HOST
+              value: "redis-master.cache.svc.cluster.local"
+            - name: REDIS_PORT
+              value: "6379"
+          envFrom:
+            - secretRef:
+                name: aws-credentials
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "500m"
+            limits:
+              memory: "2Gi"
+              cpu: "2000m"
