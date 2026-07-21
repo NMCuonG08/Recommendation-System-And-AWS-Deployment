@@ -1,0 +1,6 @@
+# CDC Lambda runtime deps. Feast [aws] pulls boto3 + dynamodb online store.
+# pyspark omitted (dynamodb+file online/offline need no spark) — saves ~500MB.
+feast[aws]==0.47.0
+pandas==2.1.4
+tenacity==8.5.0
+psycopg2-binary==2.9.9

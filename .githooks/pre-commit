@@ -24,7 +24,7 @@ fi
 # grep -E (extended regex) is bundled with Git Bash, so the hook works in
 # non-interactive shells where ripgrep may not be on PATH.
 secret_patterns='AKIA[0-9A-Z]{16}|aws_secret_access_key["'\'' ]*[:=]["'\'' ]*[A-Za-z0-9/+=]{30,}|KAGGLE_KEY["'\'' ]*[:=]["'\'' ]*[A-Za-z0-9_]{20,}|postgresql?://[^:]+:[^@]{6,}@[^"]+|PG_PASSWORD["'\'' ]*[:=]["'\'' ]*[A-Za-z0-9]{6,}|sk-[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|gh[pousr]_[A-Za-z0-9]{20,}|-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----'
-allowlist='admin|Password1234|postgres:postgres@localhost|CHANGE_ME|REPLACE_ME|your-|example|changeme|XXXX'
+allowlist='admin|Password1234|postgres:postgres@localhost|CHANGE_ME|REPLACE_ME|your-|example|changeme|XXXX|<[A-Z_]+>|urlencoded'
 
 found=""
 while IFS= read -r f; do

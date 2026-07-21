@@ -1,0 +1,23 @@
+# Feast config bundled into the CDC Lambda image.
+# Mirrors feature/feature_store/feature_store.yaml (dynamodb online + sql registry)
+# so the Lambda initializes a FeatureStore identical to the offline apply step.
+#
+# Env vars resolved at Lambda runtime (set by Terraform):
+#   REGISTRY_PATH       postgresql://postgres:***@<rds>:5432/registry_feature_store
+#   AWS_DEFAULT_REGION  ap-southeast-1
+project: feature_store_recsys
+
+registry:
+  registry_type: sql
+  path: ${REGISTRY_PATH}
+
+provider: aws
+
+entity_key_serialization_version: 2
+
+offline_store:
+  type: file
+
+online_store:
+  type: dynamodb
+  region: ${AWS_DEFAULT_REGION}
