@@ -159,12 +159,19 @@ def update_and_write_to_online(user_id: int, movie_id: int, rating: float, times
 
 
 def lambda_handler(event, context):
-    """Process a batch of Kinesis records from the DMS CDC stream."""
+    """Process a batch of CDC records from SQS FIFO or Kinesis stream."""
     logger.info("Received event: %s", json.dumps(event)[:1000])
     for record in event.get("Records", []):
         try:
-            payload = record["kinesis"]["data"]
-            decoded = json.loads(base64.b64decode(payload))
+            if "body" in record:
+                body = record["body"]
+                decoded = json.loads(body) if isinstance(body, str) else body
+            elif "kinesis" in record:
+                payload = record["kinesis"]["data"]
+                decoded = json.loads(base64.b64decode(payload))
+            else:
+                decoded = record
+                
             data = decoded.get("data", decoded)  # DMS wraps rows in {"data": ...}
             user_id = int(data["userId"])
             movie_id = int(data["movieId"])

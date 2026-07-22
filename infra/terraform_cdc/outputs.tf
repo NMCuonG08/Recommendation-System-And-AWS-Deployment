@@ -1,11 +1,11 @@
-output "kinesis_stream_arn" {
-  description = "Kinesis Data Stream ARN (CDC events)."
-  value       = aws_kinesis_stream.cdc.arn
+output "sqs_queue_arn" {
+  description = "SQS FIFO Queue ARN (CDC events)."
+  value       = aws_sqs_queue.cdc.arn
 }
 
-output "kinesis_stream_name" {
-  description = "Kinesis Data Stream name."
-  value       = aws_kinesis_stream.cdc.name
+output "sqs_queue_url" {
+  description = "SQS FIFO Queue URL."
+  value       = aws_sqs_queue.cdc.url
 }
 
 output "lambda_function_arn" {

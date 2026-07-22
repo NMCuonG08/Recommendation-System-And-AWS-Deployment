@@ -28,12 +28,12 @@ resource "aws_secretsmanager_secret_version" "feast_uri" {
 }
 
 # --------------------------------------------------------------------------- #
-# Kinesis Data Stream
+# SQS Standard Queue (Free Tier 1M requests/month)
 # --------------------------------------------------------------------------- #
-resource "aws_kinesis_stream" "cdc" {
-  name             = var.kinesis_stream_name
-  shard_count      = var.kinesis_shard_count
-  retention_period = 24
+resource "aws_sqs_queue" "cdc" {
+  name                      = var.sqs_queue_name
+  message_retention_seconds = 86400
+  visibility_timeout_seconds = var.lambda_timeout_sec * 6
 
   tags = { Project = "recsys-cdc" }
 }
@@ -91,7 +91,7 @@ resource "aws_iam_role" "dms_cloudwatch" {
 
 resource "aws_iam_role_policy_attachment" "dms_cloudwatch" {
   role       = aws_iam_role.dms_cloudwatch.name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/DMSCloudWatchLogsRole"
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonDMSCloudWatchLogsRole"
 }
 
 resource "aws_dms_replication_subnet_group" "cdc" {
@@ -126,15 +126,50 @@ resource "aws_dms_endpoint" "source" {
   }
 }
 
-resource "aws_dms_endpoint" "target" {
-  endpoint_id   = "recsys-cdc-target-kinesis"
-  endpoint_type = "target"
-  engine_name   = "kinesis"
+resource "aws_s3_bucket" "cdc" {
+  bucket        = "recsys-cdc-events-${data.aws_caller_identity.current.account_id}"
+  force_destroy = true
 
-  kinesis_settings {
-    stream_arn              = aws_kinesis_stream.cdc.arn
+  tags = { Project = "recsys-cdc" }
+}
+
+resource "aws_dms_endpoint" "target" {
+  endpoint_id   = "recsys-cdc-target-s3"
+  endpoint_type = "target"
+  engine_name   = "s3"
+
+  s3_settings {
+    bucket_name             = aws_s3_bucket.cdc.id
     service_access_role_arn = aws_iam_role.dms_vpc.arn
+    data_format             = "csv"
+    timestamp_column_name   = "timestamp"
   }
+}
+
+resource "aws_sqs_queue_policy" "cdc" {
+  queue_url = aws_sqs_queue.cdc.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "s3.amazonaws.com" }
+      Action    = "sqs:SendMessage"
+      Resource  = aws_sqs_queue.cdc.arn
+      Condition = {
+        ArnEquals = { "aws:SourceArn" = aws_s3_bucket.cdc.arn }
+      }
+    }]
+  })
+}
+
+resource "aws_s3_bucket_notification" "cdc" {
+  bucket = aws_s3_bucket.cdc.id
+
+  queue {
+    queue_arn = aws_sqs_queue.cdc.arn
+    events    = ["s3:ObjectCreated:*"]
+  }
+  depends_on = [aws_sqs_queue_policy.cdc]
 }
 
 locals {
@@ -159,14 +194,11 @@ resource "aws_dms_replication_task" "cdc" {
   source_endpoint_arn      = aws_dms_endpoint.source.endpoint_arn
   target_endpoint_arn      = aws_dms_endpoint.target.endpoint_arn
   table_mappings           = local.table_mappings
-  # Start manually after one-time SQL (pglogical + publication) is applied:
-  #   aws dms start-replication-task --replication-task-arn <out.cdc_task_arn> \
-  #     --start-replication-task-type start-replication
-  start_replication_task = false
+  start_replication_task   = false
 }
 
 # --------------------------------------------------------------------------- #
-# Lambda (Feast online update on Kinesis trigger)
+# Lambda (Feast online update on SQS trigger)
 # --------------------------------------------------------------------------- #
 resource "aws_iam_role" "lambda_exec" {
   name = "recsys-cdc-lambda-role"
@@ -193,8 +225,8 @@ resource "aws_iam_role_policy" "lambda_exec" {
       },
       {
         Effect   = "Allow"
-        Action   = ["kinesis:GetRecords", "kinesis:GetShardIterator", "kinesis:DescribeStream", "kinesis:ListShards", "kinesis:ListStreams"]
-        Resource = aws_kinesis_stream.cdc.arn
+        Action   = ["sqs:ReceiveMessage", "sqs:DeleteMessage", "sqs:GetQueueAttributes"]
+        Resource = aws_sqs_queue.cdc.arn
       },
       {
         Effect   = "Allow"
@@ -202,7 +234,6 @@ resource "aws_iam_role_policy" "lambda_exec" {
         Resource = [aws_secretsmanager_secret.feast_uri.arn]
       },
       {
-        # Feast DynamoDB online store (tables Feast creates on `feast apply`).
         Effect   = "Allow"
         Action   = ["dynamodb:BatchWriteItem", "dynamodb:PutItem", "dynamodb:GetItem", "dynamodb:Query", "dynamodb:Scan", "dynamodb:DescribeTable", "dynamodb:UpdateItem"]
         Resource = "arn:aws:dynamodb:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:table/*"
@@ -230,7 +261,6 @@ resource "aws_lambda_function" "cdc" {
       REGISTRY_PATH_SECRET_ARN = aws_secretsmanager_secret.feast_uri.arn
       FEAST_REPO               = "/var/task"
       FEAST_YAML               = "feature_store.yaml"
-      AWS_DEFAULT_REGION       = data.aws_region.current.name
     }
   }
 
@@ -238,10 +268,8 @@ resource "aws_lambda_function" "cdc" {
 }
 
 resource "aws_lambda_event_source_mapping" "cdc" {
-  event_source_arn                   = aws_kinesis_stream.cdc.arn
-  function_name                      = aws_lambda_function.cdc.arn
-  starting_position                  = "LATEST"
-  batch_size                         = var.lambda_batch_size
-  maximum_batching_window_in_seconds = 1
-  enabled                            = true
+  event_source_arn = aws_sqs_queue.cdc.arn
+  function_name    = aws_lambda_function.cdc.arn
+  batch_size       = var.lambda_batch_size
+  enabled          = true
 }

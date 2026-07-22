@@ -39,16 +39,16 @@ variable "feast_postgres_uri" {
   sensitive   = true
 }
 
+variable "sqs_queue_name" {
+  description = "SQS Standard queue name for CDC events."
+  type        = string
+  default     = "recsys-cdc-queue"
+}
+
 variable "kinesis_stream_name" {
   description = "Kinesis Data Stream name for CDC events."
   type        = string
   default     = "recsys-cdc"
-}
-
-variable "kinesis_shard_count" {
-  description = "Kinesis shard count (1 is enough for MovieLens CDC volume)."
-  type        = number
-  default     = 1
 }
 
 variable "dms_instance_class" {
@@ -75,9 +75,9 @@ variable "lambda_image_uri" {
 }
 
 variable "lambda_memory_mb" {
-  description = "Lambda memory (Feast init is heavy; 1024+ recommended)."
+  description = "Lambda memory (512MB max for account quota)."
   type        = number
-  default     = 2048
+  default     = 512
 }
 
 variable "lambda_timeout_sec" {

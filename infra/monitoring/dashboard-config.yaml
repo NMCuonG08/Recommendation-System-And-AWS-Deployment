@@ -1,0 +1,82 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kubeflow-dashboard-config
+  namespace: kubeflow
+data:
+  links: |-
+    {
+      "menuLinks": [
+        {
+          "type": "item",
+          "link": "/jupyter/",
+          "text": "Notebooks",
+          "icon": "book"
+        },
+        {
+          "type": "item",
+          "link": "/kserve-endpoints/",
+          "text": "Endpoints (Triton / KServe)",
+          "icon": "kubeflow:models"
+        },
+        {
+          "type": "item",
+          "text": "Experiments (KFP)",
+          "link": "/pipeline/#/experiments",
+          "icon": "done-all"
+        },
+        {
+          "type": "item",
+          "link": "/pipeline/#/pipelines",
+          "text": "Pipelines",
+          "icon": "kubeflow:pipeline-centered"
+        },
+        {
+          "type": "item",
+          "link": "/pipeline/#/runs",
+          "text": "Runs",
+          "icon": "maps:directions-run"
+        },
+        {
+          "type": "item",
+          "link": "/mlflow/",
+          "text": "MLflow Tracking",
+          "icon": "icons:cached"
+        },
+        {
+          "type": "item",
+          "link": "/jenkins/",
+          "text": "Jenkins CI/CD",
+          "icon": "icons:extension"
+        },
+        {
+          "type": "item",
+          "link": "/grafana/",
+          "text": "Grafana Monitoring",
+          "icon": "assessment"
+        }
+      ],
+      "externalLinks": [ ],
+      "quickLinks": [
+        {
+          "text": "Upload MovieLens KFP Pipeline",
+          "desc": "Pipelines",
+          "link": "/pipeline/"
+        },
+        {
+          "text": "View MLflow Experiments",
+          "desc": "MLflow",
+          "link": "/mlflow/"
+        },
+        {
+          "text": "Check Recommendation API Latency",
+          "desc": "Grafana",
+          "link": "/grafana/"
+        }
+      ]
+    }
+  settings: |-
+    {
+      "appTitle": "MovieLens Recommender System MLOps Platform",
+      "footerText": "Powered by Kubeflow, Triton, Feast & Ray"
+    }
