@@ -151,7 +151,10 @@ services:
   # + ranker ONNX) built by `models/ranking_sequence/convert2onnx_and_build_triton.py`.
   # The model_repository is bind-mounted (regenerated locally, not baked in).
   triton:
-    image: nvcr.io/nvidia/tritonserver:24.08-py3
+    build:
+      context: .
+      dockerfile: infra/serving-cluster/Dockerfile.triton
+    image: recsys-triton:local
     container_name: recsys-triton
     restart: unless-stopped
     command: tritonserver --model-repository=/models --strict-model-config=false
