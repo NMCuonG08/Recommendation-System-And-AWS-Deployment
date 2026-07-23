@@ -55,6 +55,7 @@ def get_features_movie(input: MovieInput) -> dict:
 
     Mirrors reference `get_features_parent_asin` but for movie aggregate views.
     """
+    store.refresh_registry()
     entity_rows = [{"movieId": input.movie_id}]
     features = [
         "movie_feature_view:movie_rating_cnt_90d",
@@ -79,6 +80,7 @@ def get_features_user(input: UserInput) -> dict:
     Mirrors reference `get_features_user`; returns the user's recent-10 movie
     sequence + ts buckets consumed by the ranker's GRU input.
     """
+    store.refresh_registry()
     entity_rows = [{"userId": input.user_id}]
     features = [
         "user_feature_view:user_rating_cnt_90d",
