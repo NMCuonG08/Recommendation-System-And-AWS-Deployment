@@ -4,7 +4,7 @@ aiohttp==3.11.15
 redis==5.2.1
 numpy==1.26.4
 pydantic==2.11.1
-tritonclient[all]==2.41.1
+tritonclient[grpc]>=2.41.0
 python-dotenv==1.1.0
 # Optional OTLP tracing — enabled only if OTEL_EXPORTER_OTLP_ENDPOINT is set.
 opentelemetry-api==1.27.0
