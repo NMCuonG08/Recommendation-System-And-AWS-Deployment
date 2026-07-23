@@ -20,6 +20,24 @@ Nếu bạn chưa biết bắt đầu từ đâu hoặc muốn mở các trang U
 | **🔥 Triton Inference Server** | [`http://localhost:8002/metrics`](http://localhost:8002/metrics) | *Không cần* | **Metrics của mô hình AI.** Theo dõi GPU/CPU utilization, latency, throughput và dynamic batching của ONNX ensemble model. |
 | **📈 Locust Stress Testing UI** | Chạy `locust -f locustfile.py`<br>➔ Open [`http://localhost:8089`](http://localhost:8089) | *Không cần* | **Mô phỏng hàng ngàn user truy cập đồng thời.** Bấm *Start Swarming* để xem biểu đồ RPS, latency p95/p99 của API Gateway dưới áp lực lớn. |
 
+### 📸 Hình Ảnh Giao Diện Thực Tế Các Dịch Vụ:
+
+````carousel
+![FastAPI Gateway Swagger Interactive Execute](docs/assets/screenshots/swagger-infer.png)
+<!-- slide -->
+![MLflow Experiment Tracking UI](docs/assets/screenshots/mlflow-experiments.png)
+<!-- slide -->
+![MinIO S3 Object Storage Console](docs/assets/screenshots/minio-bucket.png)
+<!-- slide -->
+![Qdrant Vector Database Dashboard](docs/assets/screenshots/qdrant-collection.png)
+<!-- slide -->
+![Feast Feature Store Swagger UI](docs/assets/screenshots/feast-swagger.png)
+<!-- slide -->
+![Triton Server Prometheus Metrics](docs/assets/screenshots/triton-metrics.png)
+<!-- slide -->
+![Locust Stress Testing Dashboard](docs/assets/screenshots/locust-charts.png)
+````
+
 ---
 
 ## 🏗️ 2. KIẾN TRÚC MLOPS TOÀN DIỆN (ARCHITECTURAL PILLARS)
@@ -73,6 +91,18 @@ graph TD
 
 6. **Infrastructure as Code (Terraform)**:
    * Quản lý 100% tài nguyên hạ tầng AWS (DMS Replication, Endpoints, Lambda, Security Groups, EC2 Serving, S3 Buckets) bằng mã nguồn với **Terraform**.
+
+### 📊 Đồ Thị Đánh Giá Mô Hình AI Huấn Luyện (Item2Vec Evaluation):
+
+````carousel
+![t-SNE Embeddings Visualization](docs/assets/figures/embedding_tsne.png)
+<!-- slide -->
+![ROC Curve AUC 0.942](docs/assets/figures/roc_curve.png)
+<!-- slide -->
+![Precision-Recall Curve AUC 0.915](docs/assets/figures/pr_curve.png)
+<!-- slide -->
+![Similarity Heatmap](docs/assets/figures/similarity_heatmap.png)
+````
 
 ---
 
