@@ -82,12 +82,6 @@ def _span(name: str):
     return contextlib.nullcontext()
 
 
-app = FastAPI(title="Recommender API Gateway (MovieLens)")
-
-if OTLP_ENDPOINT:
-    FastAPIInstrumentor.instrument_app(app)  # type: ignore[name-defined]
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.http_session = aiohttp.ClientSession()
@@ -107,7 +101,10 @@ async def lifespan(app: FastAPI):
         logger.info("Closed aiohttp ClientSession and Triton client")
 
 
-app.lifespan = lifespan
+app = FastAPI(title="Recommender API Gateway (MovieLens)", lifespan=lifespan)
+
+if OTLP_ENDPOINT:
+    FastAPIInstrumentor.instrument_app(app)  # type: ignore[name-defined]
 
 
 # ---------------------------------------------------------------------------
