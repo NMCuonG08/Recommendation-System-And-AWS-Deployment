@@ -99,7 +99,13 @@ def load_item2vec_embeddings() -> Tuple[torch.Tensor, Dict[int, int], List[int]]
             f"Item2Vec artifacts missing: {ckpt_path} / {idm_path}"
         )
     logger.info("Loading Item2Vec checkpoint: %s", ckpt_path)
-    ck = torch.load(ckpt_path, map_location="cpu", weights_only=True)
+    try:
+        if hasattr(torch.serialization, "add_safe_globals"):
+            from models.item2vec.model import SkipGram
+            torch.serialization.add_safe_globals([SkipGram])
+        ck = torch.load(ckpt_path, map_location="cpu", weights_only=True)
+    except Exception:
+        ck = torch.load(ckpt_path, map_location="cpu", weights_only=False)
     state = ck.get("state_dict", ck)
     weight = state[_EMBED_KEY].detach().cpu()  # [num_items+1, dim]
 
