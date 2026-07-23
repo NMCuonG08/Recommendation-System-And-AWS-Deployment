@@ -4,45 +4,27 @@ Hệ thống Gợi Ý Phim Thời Gian Thực (Real-Time Movie Recommendation Sy
 
 ---
 
-## 🗺️ 1. GÓC "MÙ ĐƯỜNG" - DANH SÁCH DASHBOARD & HAY HO ĐỂ CHECK!
+## 🗺️ 1. GÓC "MÙ ĐƯỜNG" - DANH SÁCH DASHBOARD & BẢN ĐỒ BẢNG ĐIỀU KHIỂN
 
-Nếu bạn chưa biết bắt đầu từ đâu hoặc muốn mở các trang UI/Dashboard để trải nghiệm hệ thống đang chạy, đây là **bản đồ điều khiển**:
+Nếu bạn muốn trải nghiệm trực tiếp các ứng dụng và dashboard đang vận hành, đây là **bản đồ điều khiển**:
 
-> 💡 *Ghi chú:* Nếu bạn đang chạy trên máy local, dùng `localhost`. Nếu đang triển khai trên EC2 AWS, hãy thay `localhost` bằng `<EC2_PUBLIC_IP>`.
+> 💡 *Ghi chú:* Nếu chạy local dùng `localhost`. Nếu triển khai trên AWS EC2, thay `localhost` bằng `<EC2_PUBLIC_IP>`.
 
-| Tên Dashboard / Service | URL / Link | Tài Khoản (nếu có) | Tính Năng / Thứ Hay Ho Cần Check |
+| Tên Dashboard / Service | URL / Link | Tài Khoản (nếu có) | Tính Năng / Trải Nghiệm Cần Check |
 | :--- | :--- | :--- | :--- |
-| **🚀 FastAPI Gateway (Swagger UI)** | [`http://localhost:8080/docs`](http://localhost:8080/docs) | *Không cần* | **Giao diện test API trực tiếp!** Bạn có thể gõ `user_id=1` bấm **Execute** để xem danh sách gợi ý phim thời gian thực + điểm số score. |
-| **📊 MLflow Experiment Tracking** | [`http://localhost:5000`](http://localhost:5000) | *Không cần* | **Trạm quản lý mô hình AI.** Xem lịch sử train mô hình Item2Vec, so sánh thông số (loss, accuracy, AUC), xem Model Registry champion & tải báo cáo HTML của Evidently AI. |
-| **🗄️ MinIO S3 Web Console** | [`http://localhost:9101`](http://localhost:9101) | User: `admin`<br>Pass: `Password1234` | **Giao diện quản lý file S3 Storage.** Kiểm tra bucket `recsys-ops`, xem dữ liệu Parquet, Feature Store data, CDC logs và MLflow model artifacts. |
-| **🔍 Qdrant Vector DB Dashboard** | [`http://localhost:6333/dashboard`](http://localhost:6333/dashboard) | *Không cần* | **Trình duyệt Vector Database.** Kiểm tra collection vector nhúng `movie_embeddings` (Item2Vec), cấu hình chỉ mục HNSW và tìm kiếm ứng viên tương tự. |
-| **⚡ Feast Feature Store API** | [`http://localhost:8010/docs`](http://localhost:8010/docs) | *Không cần* | **Swagger API của Feature Store.** Kiểm tra cách lấy đặc trưng thời gian thực (real-time features) của User và Item lưu trong Redis. |
-| **🔥 Triton Inference Server** | [`http://localhost:8002/metrics`](http://localhost:8002/metrics) | *Không cần* | **Metrics của mô hình AI.** Theo dõi GPU/CPU utilization, latency, throughput và dynamic batching của ONNX ensemble model. |
-| **📈 Locust Stress Testing UI** | Chạy `locust -f locustfile.py`<br>➔ Open [`http://localhost:8089`](http://localhost:8089) | *Không cần* | **Mô phỏng hàng ngàn user truy cập đồng thời.** Bấm *Start Swarming* để xem biểu đồ RPS, latency p95/p99 của API Gateway dưới áp lực lớn. |
-
-### 📸 Hình Ảnh Giao Diện Thực Tế Các Dịch Vụ:
-
-````carousel
-![FastAPI Gateway Swagger Interactive Execute](docs/assets/screenshots/swagger-infer.png)
-<!-- slide -->
-![MLflow Experiment Tracking UI](docs/assets/screenshots/mlflow-experiments.png)
-<!-- slide -->
-![MinIO S3 Object Storage Console](docs/assets/screenshots/minio-bucket.png)
-<!-- slide -->
-![Qdrant Vector Database Dashboard](docs/assets/screenshots/qdrant-collection.png)
-<!-- slide -->
-![Feast Feature Store Swagger UI](docs/assets/screenshots/feast-swagger.png)
-<!-- slide -->
-![Triton Server Prometheus Metrics](docs/assets/screenshots/triton-metrics.png)
-<!-- slide -->
-![Locust Stress Testing Dashboard](docs/assets/screenshots/locust-charts.png)
-````
+| **🚀 FastAPI Gateway (Swagger UI)** | [`http://localhost:8080/docs`](http://localhost:8080/docs) | *Không cần* | **Giao diện test API trực tiếp!** Gõ `user_id=1` bấm **Execute** để xem gợi ý phim thời gian thực + điểm số ranking score. |
+| **📊 MLflow Experiment Tracking** | [`http://localhost:5000`](http://localhost:5000) | *Không cần* | **Trạm quản lý mô hình AI.** Xem lịch sử train Item2Vec, so sánh loss/accuracy/AUC và xem phiên bản Model Champion. |
+| **🗄️ MinIO S3 Web Console** | [`http://localhost:9101`](http://localhost:9101) | User: `admin`<br>Pass: `Password1234` | **Quản lý S3 Storage.** Xem bucket `recsys-ops`, dữ liệu Parquet, CDC delta logs và MLflow model artifacts. |
+| **🔍 Qdrant Vector DB Dashboard** | [`http://localhost:6333/dashboard`](http://localhost:6333/dashboard) | *Không cần* | **Trình duyệt Vector DB.** Kiểm tra collection nhúng `movie_embeddings` (Item2Vec), chỉ mục HNSW và vector search. |
+| **⚡ Feast Feature Store API** | [`http://localhost:8010/docs`](http://localhost:8010/docs) | *Không cần* | **Swagger API của Feature Store.** Kiểm tra cách lấy đặc trưng thời gian thực (user & item features) từ Redis. |
+| **🔥 Triton Inference Server** | [`http://localhost:8002/metrics`](http://localhost:8002/metrics) | *Không cần* | **Metrics mô hình AI.** Theo dõi CPU/GPU, latency, throughput và ONNX Ensemble dynamic batching. |
+| **📈 Locust Stress Testing UI** | [`http://localhost:8089`](http://localhost:8089) | *Không cần* | **Mô phỏng chịu tải lớn.** Bấm *Start Swarming* để xem biểu đồ RPS, latency p95/p99 dưới áp lực 100 concurrent users. |
 
 ---
 
-## 🏗️ 2. KIẾN TRÚC MLOPS TOÀN DIỆN (ARCHITECTURAL PILLARS)
+## 🏗️ 2. KIẾN TRÚC MLOPS TOÀN DIỆN & MINH CHỨNG THỰC TẾ
 
-Hệ thống được thiết kế theo mô hình **Lambda Architecture** kết hợp luồng xử lý sự kiện thời gian thực (**Real-Time CDC**) và hệ thống phục vụ suy luận độ trễ thấp (**Low-Latency Two-Stage Serving**).
+Hệ thống được thiết kế theo mô hình **Lambda Architecture** kết hợp luồng xử lý sự kiện thời gian thực (**Real-Time CDC**) và hạ tầng suy luận hai giai đoạn độ trễ thấp (**Low-Latency Two-Stage Serving**).
 
 ```mermaid
 graph TD
@@ -70,39 +52,71 @@ graph TD
     end
 ```
 
-### 📋 6 Trụ Cột Cốt Lõi Trong Architecture:
+---
 
-1. **Real-Time CDC Pipeline (Change Data Capture)**:
-   * Sử dụng **PostgreSQL Native Logical Replication + AWS DMS (Database Migration Service)** để bắt từng sự kiện `movie_ratings` theo thời gian thực với **0% ảnh hưởng đến hiệu năng OLTP Database**.
-   * Đẩy sự kiện qua **AWS S3 ➔ Lambda Function** để cập nhật Feature mới nhất vào Feature Store.
+### 📋 Chi Tiết 6 Trụ Cột MLOps & Hình Ảnh Minh Chứng Theo Mục:
 
-2. **Feature Store Tập Trung (Feast)**:
-   * Quản lý nhất quán tập đặc trưng (Features) giữa 2 môi trường: **Offline** (huấn luyện batch) và **Online Store** (lấy đặc trưng độ trễ sub-millisecond khi ranking).
+#### 1. Real-Time CDC Pipeline & Object Storage (AWS DMS + S3 + MinIO)
+Đồng bộ từng sự kiện `movie_ratings` mới từ OLTP Database qua AWS DMS + S3 Event Notification + AWS Lambda vào Feast Store với **0% ảnh hưởng đến OLTP Database**.
 
-3. **Two-Stage Recommendation Architecture**:
-   * **Stage 1 (Retrieval / Candidate Generation)**: Dùng **Qdrant Vector DB** (Item2Vec HNSW) để lọc ra top ứng viên phù hợp + **Redis Fallback** cho Cold Start.
-   * **Stage 2 (Ranking)**: Sử dụng mô hình Deep Learning đóng gói dưới dạng **ONNX Ensemble Pipeline** trên **Triton Inference Server**, hỗ trợ **Dynamic Batching** và **Concurrent Execution**.
+![MinIO S3 Object Storage Console](docs/assets/screenshots/minio-bucket.png)
+*Hình 2.1: Giao diện MinIO S3 Storage lưu trữ các file Parquet dữ liệu thô, CDC delta log và MLflow artifacts.*
 
-4. **Data Drift & Quality Monitoring (Evidently AI)**:
-   * Tự động kiểm tra sự suy giảm phân phối dữ liệu (Data Drift / Concept Drift) từ luồng dữ liệu CDC để cảnh báo retrain mô hình.
+---
 
-5. **MLflow Experiment Tracking & Model Registry**:
-   * Theo dõi toàn bộ quá trình huấn luyện, hyperparameters, metrics (AUC, Precision/Recall), lưu vết artifact và quản lý phiên bản model champion.
+#### 2. Feature Store Tập Trung Thời Gian Thực (Feast Store API + Redis)
+Quản lý nhất quán tập đặc trưng giữa 2 môi trường: **Offline** (huấn luyện batch) và **Online Store** (lấy đặc trưng độ trễ sub-millisecond trên Redis).
 
-6. **Infrastructure as Code (Terraform)**:
-   * Quản lý 100% tài nguyên hạ tầng AWS (DMS Replication, Endpoints, Lambda, Security Groups, EC2 Serving, S3 Buckets) bằng mã nguồn với **Terraform**.
+![Feast Feature Store Swagger UI](docs/assets/screenshots/feast-swagger.png)
+*Hình 2.2: Giao diện Swagger UI của Feast API kết nối trực tiếp với Redis Online Store để phục vụ truy vấn đặc trưng.*
 
-### 📊 Đồ Thị Đánh Giá Mô Hình AI Huấn Luyện (Item2Vec Evaluation):
+---
 
-````carousel
-![t-SNE Embeddings Visualization](docs/assets/figures/embedding_tsne.png)
-<!-- slide -->
-![ROC Curve AUC 0.942](docs/assets/figures/roc_curve.png)
-<!-- slide -->
-![Precision-Recall Curve AUC 0.915](docs/assets/figures/pr_curve.png)
-<!-- slide -->
-![Similarity Heatmap](docs/assets/figures/similarity_heatmap.png)
-````
+#### 3. Mô Hình Suy Luận Hai Giai Đoạn (Two-Stage Recommendation Serving)
+* **Stage 1 (Candidate Retrieval)**: Dùng **Qdrant Vector DB** (Item2Vec HNSW) để chọn ra Top 100 bộ phim ứng viên tương tự + **Redis Fallback** cho Cold Start.
+* **Stage 2 (Deep Ranking)**: **FastAPI Gateway** gửi mảng đặc trưng sang **Triton Inference Server** (mô hình ONNX Ensemble) để chấm điểm chính xác từng ứng viên trong **< 18ms**.
+
+![Qdrant Vector DB Dashboard](docs/assets/screenshots/qdrant-collection.png)
+*Hình 2.3: Dashboard quản lý Collection `movie_embeddings` trong Qdrant Vector Database chứa ~9.7k vectors nhúng 64 chiều.*
+
+![Triton Server Prometheus Metrics](docs/assets/screenshots/triton-metrics.png)
+*Hình 2.4: Trang Prometheus Metrics đo đạc hiệu năng suy luận mô hình ONNX Ensemble trên Triton Inference Server.*
+
+![FastAPI Gateway Interactive Execute](docs/assets/screenshots/swagger-infer.png)
+*Hình 2.5: Thử nghiệm tương tác thực tế trên FastAPI Gateway (Swagger UI): nhập `user_id=1`, bấm Execute và nhận kết quả gợi ý 200 OK.*
+
+---
+
+#### 4. Model Training, Experiment Tracking & Model Registry (MLflow + PyTorch)
+Theo dõi toàn bộ quá trình huấn luyện mô hình **Item2Vec** (Word2Vec Skip-gram tối ưu cho RecSys), lưu vết hyperparameters, loss curves và gán nhãn phiên bản mô hình **Champion**.
+
+![MLflow Experiment Tracking UI](docs/assets/screenshots/mlflow-experiments.png)
+*Hình 2.6: Giao diện MLflow Experiment Tracking trực quan hóa các Runs huấn luyện và Model Registry Champion.*
+
+##### 📊 Các Đồ Thị Đánh Giá Mô Hình AI Huấn Luyện (Item2Vec Evaluation):
+
+| Không Gian Nhúng Vector (t-SNE Embeddings) | Đường Cong ROC-AUC (AUC = 0.942) |
+| :---: | :---: |
+| ![t-SNE Embeddings](docs/assets/figures/embedding_tsne.png) | ![ROC Curve](docs/assets/figures/roc_curve.png) |
+| *Phân cụm các bộ phim theo thể loại rõ nét* | *Khả năng phân biệt cặp phim chính xác (AUC = 0.942)* |
+
+| Ma Trận Độ Tương Đồng (Similarity Heatmap) | Đường Cong Precision-Recall (AUC = 0.915) |
+| :---: | :---: |
+| ![Similarity Heatmap](docs/assets/figures/similarity_heatmap.png) | ![Precision-Recall Curve](docs/assets/figures/pr_curve.png) |
+| *Cosine Similarity giữa các bộ phim cùng series* | *Độ chính xác cao trên tập dữ liệu mất cân bằng* |
+
+---
+
+#### 5. Kiểm Thử Chịu Tải & Giám Sát Hiệu Năng (Locust Stress Testing)
+Sử dụng Locust Framework để mô phỏng tải lớn từ **100 người dùng giả lập đồng thời** liên tục gửi request gợi ý tới API Gateway:
+
+![Locust Stress Testing Dashboard](docs/assets/screenshots/locust-charts.png)
+*Hình 2.7: Biểu đồ đo đạc Locust Benchmark đạt Throughput **468.5 RPS**, Latency p95 **< 18ms** và tỷ lệ lỗi **0.00%**.*
+
+---
+
+#### 6. Hạ Tầng Dưới Dạng Mã Nguồn (Terraform Infrastructure as Code)
+Toàn bộ tài nguyên hạ tầng AWS (EC2 Serving Instance, RDS PostgreSQL, DMS Task, Lambda, SQS, S3, EKS Cluster) được quản lý 100% bằng **Terraform** (`infra/terraform_ec2`, `infra/terraform_cdc`, `infra/terraform_eks`).
 
 ---
 
@@ -158,35 +172,12 @@ curl.exe "http://localhost:8080/infer?user_id=1"
 curl -X GET "http://localhost:8080/infer?user_id=1"
 ```
 
-**Kỳ vọng Response (HTTP 200 OK):**
-```json
-{
-  "user_id": 1,
-  "recommendations": [
-    {"movie_id": 356, "score": 0.94868},
-    {"movie_id": 1198, "score": 0.92915},
-    {"movie_id": 858, "score": 0.92796},
-    {"movie_id": 4993, "score": 0.91129}
-  ]
-}
-```
-
 ---
 
-### 🅲 Kiểm Thử Chịu Tải (Load Testing với Locust)
+## 📚 5. TÀI LIỆU & BÁO CÁO TỔNG HỢP DỰ ÁN (DOCUMENTATION)
 
-Mô phỏng hàng trăm nghìn request để đo throughput và latency:
-```bash
-locust -f locustfile.py --host http://localhost:8080
-```
-Sau đó mở trình duyệt tại `http://localhost:8089`, nhập số lượng user (ví dụ: `100`) và bấm **Start swarming**.
-
----
-
-## 📚 5. TÀI LIỆU CHI TIẾT DỰ ÁN (DOCUMENTATION)
-
-* 🛠️ **[Báo Cáo A — Minh Chứng Triển Khai Hạ Tầng (docs/deployment-evidence.md)](docs/deployment-evidence.md)**
-* 📊 **[Báo Cáo B — Kết Quả & Metrics Đánh Giá (docs/results-report.md)](docs/results-report.md)**
+* 🛠️ **[Báo Cáo A — Minh Chứng Triển Khai Hạ Tầng (docs/deployment-evidence.md)](docs/deployment-evidence.md)**: Minh chứng 7 dịch vụ với ảnh screenshot tương tác, lệnh khởi chạy, log output thật và danh sách tài nguyên Terraform.
+* 📊 **[Báo Cáo B — Kết Quả & Metrics Đánh Giá (docs/results-report.md)](docs/results-report.md)**: Đầy đủ 8 biểu đồ huấn luyện Item2Vec, phân tích không gian vector, timing latency và Locust stress testing benchmark.
 * 📖 **[Hướng Dẫn Triển Khai Toàn Diện AWS (docs/deployment-guide.md)](docs/deployment-guide.md)**
 * 🏗️ **[Kiến Trúc CDC & Real-Time Setup (docs/03-realtime-cdc.md)](docs/03-realtime-cdc.md)**
 * ☸️ **[Hướng Dẫn Triển Khai EKS Kubernetes Cluster (docs/eks-deploy.md)](docs/eks-deploy.md)**
@@ -200,7 +191,10 @@ Recommendation_System/
 ├── api_gateway/            # FastAPI Gateway (Stage 1 + Stage 2 coordinator)
 ├── configs/                # Cấu hình dự án (FastAPI, MLflow, Feast)
 ├── data_pipeline/          # Xử lý dữ liệu CDC, S3 event triggers, Lambda
-├── docs/                   # Toàn bộ tài liệu kỹ thuật & deployment guides
+├── docs/                   # Báo cáo A, Báo cáo B & toàn bộ tài liệu kỹ thuật
+│   ├── assets/             # Screenshots giao diện & Đồ thị đánh giá mô hình
+│   ├── deployment-evidence.md # Báo Cáo A - Deployment Evidence
+│   └── results-report.md      # Báo Cáo B - Results & Metrics
 ├── feature/                # Feast Feature Store definitions & API
 ├── infra/                  # Terraform IaC (EC2, EKS, DMS, Lambda, S3) & K8s helm
 ├── models/                 # Model training (Item2Vec, Deep Ranking), ONNX conversion
