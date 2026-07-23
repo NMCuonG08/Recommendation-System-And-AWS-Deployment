@@ -1,5 +1,8 @@
 # Data & Service Setup Guide
 
+> 🛠️ **[Báo Cáo A — Minh Chứng Triển Khai Hạ Tầng (deployment-evidence.md)](deployment-evidence.md)**: Minh chứng 7 dịch vụ bằng ảnh screenshot, command và output thật.
+> 📊 **[Báo Cáo B — Kết Quả & Metrics Đánh Giá (results-report.md)](results-report.md)**: Đầy đủ 8 biểu đồ huấn luyện, timing latency và Locust stress test benchmark.
+
 This project prepares the Kaggle **MovieLens ml-latest-small** dataset
 (`shubhammehta21/movie-lens-small-latest-dataset`) and uploads it to an OLTP database
 (Postgres) + object storage (S3), mirroring the reference project's `02-upload-data.ipynb`

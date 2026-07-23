@@ -155,9 +155,10 @@ Sau đó mở trình duyệt tại `http://localhost:8089`, nhập số lượng
 
 ## 📚 5. TÀI LIỆU CHI TIẾT DỰ ÁN (DOCUMENTATION)
 
+* 🛠️ **[Báo Cáo A — Minh Chứng Triển Khai Hạ Tầng (docs/deployment-evidence.md)](docs/deployment-evidence.md)**
+* 📊 **[Báo Cáo B — Kết Quả & Metrics Đánh Giá (docs/results-report.md)](docs/results-report.md)**
 * 📖 **[Hướng Dẫn Triển Khai Toàn Diện AWS (docs/deployment-guide.md)](docs/deployment-guide.md)**
 * 🏗️ **[Kiến Trúc CDC & Real-Time Setup (docs/03-realtime-cdc.md)](docs/03-realtime-cdc.md)**
-* 📊 **[Báo Cáo Huấn Luyện Item2Vec & Evidently AI (docs/item2vec-training-report.md)](docs/item2vec-training-report.md)**
 * ☸️ **[Hướng Dẫn Triển Khai EKS Kubernetes Cluster (docs/eks-deploy.md)](docs/eks-deploy.md)**
 
 ---
