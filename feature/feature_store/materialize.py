@@ -86,12 +86,14 @@ def main() -> None:
             logger.info("Config already active or read-only filesystem; proceeding with active config.")
 
     from feast import FeatureStore
+    from entities import movie, user
+    from feature_views import movie_feature_view, user_feature_view
 
     store = FeatureStore(repo_path=str(REPO_DIR), fs_yaml_file="feature_store.yaml")
 
     if not args.no_apply:
         logger.info("Applying feature definitions...")
-        store.apply(store.list_feature_views())
+        store.apply([movie, user, movie_feature_view, user_feature_view])
         logger.info("Feast apply complete.")
 
     end_ts = args.end or _latest_event_timestamp()
