@@ -61,7 +61,12 @@ ITEM2VEC_FINAL_DIR = ROOT / "models" / "output" / "item2vec" / "final_model"
 TOP_K_SIMILAR = int(os.environ.get("TOP_K_SIMILAR", 10))   # rec:{movieId} size
 QDRANT_SEARCH_LIMIT = int(os.environ.get("QDRANT_SEARCH_LIMIT", 50))
 BATCH_SIZE = int(os.environ.get("BATCH_SIZE", 256))
+# Primary popularity source: raw interactions (one row per rating). Fall back to
+# the per-(movieId, event_timestamp) aggregate snapshot when the raw train split
+# is absent (only movie_rating_stats.parquet was materialized) — popular_movie_score
+# must still be written or the gateway has no popularity candidates at all.
 TRAIN_PARQUET = ROOT / "feature" / "output" / "train.parquet"
+MOVIE_STATS_PARQUET = ROOT / "feature" / "output" / "movie_rating_stats.parquet"
 
 # Embedding key in the item2vec Lightning checkpoint (LitSkipGram).
 _EMBED_KEY = "skipgram_model.embeddings.weight"
@@ -162,15 +167,43 @@ def index_embeddings_to_qdrant(
 # ---------------------------------------------------------------------------
 
 
-def compute_popular_items(redis_client, train_parquet: Path = TRAIN_PARQUET) -> int:
+def compute_popular_items(
+    redis_client,
+    train_parquet: Path = TRAIN_PARQUET,
+    movie_stats_parquet: Path = MOVIE_STATS_PARQUET,
+) -> int:
     """Score movies by rating count and load Redis zset `popular_movie_score`.
 
     The gateway reads this zset as the popularity-based candidate source
-    (reference: `popular_parent_asin_score`).
+    (reference: `popular_parent_asin_score`). Prefers the raw interaction split
+    (`train.parquet`, one row per rating -> groupby size) and falls back to the
+    per-(movieId, event_timestamp) aggregate snapshot
+    (`movie_rating_stats.parquet`), taking the latest snapshot's 90-day rating
+    count per movie so each movie is counted once.
     """
-    logger.info("Computing popular items from %s", train_parquet)
-    df = pd.read_parquet(train_parquet)
-    counts = df.groupby("movieId").size().sort_values(ascending=False)
+    if train_parquet.is_file():
+        logger.info("Computing popular items from interactions: %s", train_parquet)
+        df = pd.read_parquet(train_parquet)
+        counts = df.groupby("movieId").size().sort_values(ascending=False)
+    elif movie_stats_parquet.is_file():
+        logger.info("train.parquet missing; falling back to %s", movie_stats_parquet)
+        df = pd.read_parquet(movie_stats_parquet)
+        # movie_rating_stats has one row per (movieId, event_timestamp) snapshot.
+        # Keep the latest snapshot per movie and use its 90-day rating count.
+        latest = (
+            df.sort_values("event_timestamp")
+            .groupby("movieId", as_index=False)
+            .tail(1)
+        )
+        counts = (
+            latest.set_index("movieId")["movie_rating_cnt_90d"]
+            .sort_values(ascending=False)
+        )
+    else:
+        raise FileNotFoundError(
+            f"Neither {train_parquet} nor {movie_stats_parquet} exist; cannot "
+            "compute popular items. Run the feature ETL first."
+        )
     logger.info("Popular items: %d movies scored", len(counts))
 
     key = "popular_movie_score"
@@ -208,11 +241,14 @@ def compute_similar_items(
     written = 0
     for idx in range(n_items):
         movie_id = int(index_to_item[idx])
-        neighbors = qdrant_client.search(
+        # qdrant-client >= 1.7 removed `.search(query_vector=...)`; use
+        # `.query_points(query=...)` which returns `.points` (list of ScoredPoint).
+        response = qdrant_client.query_points(
             collection_name=collection_name,
-            query_vector=embeddings[idx].tolist(),
+            query=embeddings[idx].tolist(),
             limit=search_limit + 1,
         )
+        neighbors = response.points
         neighbor_payloads = [
             (n.payload.get("item_id") if n.payload else None, n.score)
             for n in neighbors
