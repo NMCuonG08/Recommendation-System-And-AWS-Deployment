@@ -548,6 +548,7 @@ _ITEM_PIPELINE_SCRIPT = '''
 import dill
 import logging
 import os
+import sys
 import numpy as np
 import pandas as pd
 import triton_python_backend_utils as pb_utils
@@ -574,6 +575,12 @@ class TritonPythonModel:
 
     def initialize(self, args):
         model_dir = os.path.dirname(__file__)
+        # The dill-pickled pipeline wraps module-level functions from
+        # `feature.features.tfm` in sklearn FunctionTransformers / vectorizer
+        # tokenizers, so unpickling imports that module. Bundle a copy of it
+        # next to model.py (see _write_item_pipeline) and put this dir on the
+        # path so the import resolves without mounting the whole repo.
+        sys.path.insert(0, model_dir)
         pkl_path = os.path.join(model_dir, "item_metadata_pipeline.dill")
         logger.info(f"Loading item pipeline from: {pkl_path}")
         with open(pkl_path, "rb") as f:
@@ -661,6 +668,21 @@ def _write_item_pipeline(repo_path: str, item_pipeline) -> None:
         f.write(_ITEM_PIPELINE_SCRIPT)
     with open(os.path.join(version_dir, "item_metadata_pipeline.dill"), "wb") as f:
         dill.dump(item_pipeline, f)
+
+    # Bundle `feature.features.tfm` next to model.py so the dill-pickled
+    # pipeline can re-import its module-level helper functions
+    # (reshape_2d_to_1d / todense / tokenizer) inside the container, which has
+    # only the model_repository mounted (no repo root on sys.path). Empty
+    # __init__.py files make `feature` and `feature.features` importable
+    # packages rooted at the model dir (model.py prepends it to sys.path).
+    import shutil
+    tfm_src = ROOT / "feature" / "features" / "tfm.py"
+    bundled = os.path.join(version_dir, "feature", "features")
+    os.makedirs(bundled, exist_ok=True)
+    open(os.path.join(version_dir, "feature", "__init__.py"), "w").close()
+    open(os.path.join(bundled, "__init__.py"), "w").close()
+    shutil.copyfile(tfm_src, os.path.join(bundled, "tfm.py"))
+    logger.info("bundled feature.features.tfm into item_pipeline backend")
 
     item_pipeline_config = f"""
 name: "item_pipeline"

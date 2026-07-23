@@ -11,8 +11,14 @@
 #   DOCKER_USER=nmcuong08 TAG=v1 bash infra/scripts/build_push_serving.sh
 FROM nvcr.io/nvidia/tritonserver:24.08-py3
 
-RUN pip install --no-cache-dir dill numpy pandas scikit-learn
+# Pin to the host's exact versions so the dill-pickled item_metadata_pipeline
+# (a sklearn ColumnTransformer) unpickles cleanly inside the container. A
+# sklearn/numpy/dill version skew raises on `dill.load` and the item_pipeline
+# backend stays UNAVAILABLE, breaking the whole ensemble.
+RUN pip install --no-cache-dir \
+    "dill==0.4.1" \
+    "numpy==1.26.4" \
+    "pandas==1.3.5" \
+    "scikit-learn==1.7.2"
 
 EXPOSE 8000 8001 8002
-
-ENTRYPOINT ["tritonserver"]
