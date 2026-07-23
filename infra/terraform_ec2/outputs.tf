@@ -22,3 +22,8 @@ output "triton_url" {
   description = "Triton Inference Server HTTP URL."
   value       = "http://${aws_instance.serving.public_ip}:8000"
 }
+
+output "triton_s3_bucket" {
+  description = "S3 Bucket name for Triton Model Repository."
+  value       = aws_s3_bucket.triton_repo.bucket
+}

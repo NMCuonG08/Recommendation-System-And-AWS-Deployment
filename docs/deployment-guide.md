@@ -1,168 +1,235 @@
-# 🚀 Báo Cáo & Hướng Dẫn Deployment Toàn Diện — MovieLens Recommender System
+# 🚀 Hướng Dẫn Triển Khai Recommender System Từ Đầu Cho Học Viên / Engineers
 
-Tài liệu này cung cấp quy trình triển khai (Deployment Playbook) từng bước chi tiết cho các phân hệ đã hoàn thiện mã nguồn nhưng chưa deploy lên cụm hạ tầng AWS / Kubernetes.
-
----
-
-## 🗺️ Tổng Quan Các Phân Hệ Triển Khai
-
-| Stage | Phân Hệ | Mục Tiêu Triển Khai | Công Cụ & File Thực Thi |
-|-------|---------|---------------------|------------------------|
-| **Stage 3** | **Real-Time CDC** | Đồng bộ rating thời gian thực từ RDS ➔ Feast Online | `infra/scripts/build_push_lambda_cdc.sh`, `infra/terraform_cdc/`, AWS Lambda |
-| **Stage 3.1** | **Data Drift Detection** | Giám sát suy giảm phân phối dữ liệu CDC với Evidently AI | `data_pipeline/check_drift/Dockerfile`, `app.py` |
-| **Stage 5** | **Serving Cluster** | Deploy Triton Inference, Qdrant, Feast API & Gateway | `infra/scripts/build_push_serving.sh`, `infra/serving-cluster/`, `infra/qdrant/`, `api_gateway/` |
-| **Stage 6** | **CI/CD & Monitoring** | Tự động hóa rollout khi model mới + Giám sát hạ tầng | `infra/jenkins-stack/`, `watcher-pod/`, `infra/monitoring/dashboard-config.yaml`, `locustfile.py` |
+Tài liệu này hướng dẫn bạn **tự tay triển khai toàn bộ hệ thống Recommendation System** từ đầu đến cuối trên hạ tầng AWS (RDS PostgreSQL, AWS DMS, AWS Lambda, AWS S3, AWS ECR, EC2 Serving, Qdrant Vector DB, Triton Inference Server & API Gateway).
 
 ---
 
-## ⚡ 1. Giai Đoạn 3: Triển Khai Luồng Real-Time CDC trên AWS
+## 🛑 Trạng Thái Hiện Tại: Đã Clean sạch 100% Hạ Tầng Cũ (Clean State)
+Tất cả tài nguyên AWS (DMS Replication Instance, Endpoints, Lambda, Parameter Groups, RDS Database, EC2 Instance) đã được **`terraform destroy`** và xoá sạch. Bạn sẽ bắt đầu tạo lại từng tài nguyên chính tay mình.
 
-### Bước 1.1: Build & Push Lambda CDC Docker Image lên AWS ECR
+---
+
+## 🛠️ Chuẩn Bị Trước Khi Thực Hiện (Prerequisites)
+
+1. **AWS CLI & Đăng nhập tài khoản AWS**:
+   ```powershell
+   aws configure
+   # Nhập AWS Access Key ID, Secret Access Key, Region: ap-southeast-1, Output format: json
+   ```
+2. **Kích hoạt Python Virtual Environment**:
+   ```powershell
+   .venv\Scripts\activate
+   ```
+
+---
+
+## 📍 Bước 1: Khởi Tạo Hạ Tầng EC2 Serving & S3 Model Bucket (Terraform EC2)
+
+1. Chuyển vào thư mục `infra/terraform_ec2`:
+   ```powershell
+   cd infra/terraform_ec2
+   terraform init
+   terraform apply -auto-approve
+   ```
+2. Lưu lại thông tin từ Output:
+   - `ec2_public_ip`: IP công khai của EC2 Serving Server.
+   - `triton_s3_bucket`: Tên S3 Bucket lưu trữ Triton Model Repository (dạng `recsys-triton-repo-<ACCOUNT_ID>`).
+
+---
+
+## 📍 Bước 2: Đồng Bộ Triton Model Repository Lên AWS S3
+
+Thực hiện đồng bộ 9 file mô hình ONNX Ensemble và cấu hình Triton lên S3 Bucket vừa tạo:
+
+Nếu bạn dùng **Git Bash (MINGW64)**:
 ```bash
-# Thiết lập AWS Region và chạy script đóng gói Lambda image
-export AWS_REGION=ap-southeast-1
-bash infra/scripts/build_push_lambda_cdc.sh
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+aws s3 sync models/ranking_sequence/model_repository/ "s3://recsys-triton-repo-${ACCOUNT_ID}/" --region ap-southeast-1
 ```
-*Ghi nhận lại giá trị `image_uri` xuất ra ở cuối script (ví dụ: `123456789012.dkr.ecr.ap-southeast-1.amazonaws.com/recsys-cdc-lambda:latest`).*
 
-### Bước 1.2: Khởi tạo Hạ tầng CDC bằng Terraform
-```bash
-cd infra/terraform_cdc
-terraform init
-
-# Chạy terraform apply với các tham số kết nối thực tế
-terraform apply \
-  -var="rds_endpoint=recsys-oltp.xxxxxx.ap-southeast-1.rds.amazonaws.com" \
-  -var="rds_password=YOUR_RDS_PASSWORD" \
-  -var="feast_postgres_uri=postgresql://postgres:YOUR_RDS_PASSWORD@recsys-oltp.xxxxxx.ap-southeast-1.rds.amazonaws.com:5432/registry_feature_store" \
-  -var="lambda_image_uri=<LAMBDA_IMAGE_URI_TU_BUOC_1.1>" \
-  -var="dms_vpc_subnet_ids=[\"subnet-xxx\",\"subnet-yyy\"]" \
-  -var="dms_vpc_security_group_ids=[\"sg-xxx\"]"
+Nếu bạn dùng **PowerShell**:
+```powershell
+$ACCOUNT_ID = (aws sts get-caller-identity --query Account --output text)
+aws s3 sync models/ranking_sequence/model_repository/ "s3://recsys-triton-repo-$ACCOUNT_ID/" --region ap-southeast-1
 ```
 
-### Bước 1.3: Cấu hình One-Time trên RDS PostgreSQL & pglogical
-Terraform tạo parameter group `recsys-cdc-logical-repl` (`rds.logical_replication=1`). Cần gán parameter group và reboot RDS:
+*Kiểm tra danh sách file trên S3:*
+```powershell
+aws s3 ls "s3://recsys-triton-repo-$ACCOUNT_ID/" --recursive --region ap-southeast-1
+```
+
+---
+
+## 📍 Bước 3: Build & Push Lambda CDC Docker Image Lên AWS ECR
+
+1. Đảm bảo Docker Desktop đã bật (hoặc chạy trong bash terminal):
+   ```bash
+   export AWS_REGION=ap-southeast-1
+   bash infra/scripts/build_push_lambda_cdc.sh
+   ```
+2. Copy đường dẫn image URI xuất ra ở màn hình (ví dụ: `<ACCOUNT_ID>.dkr.ecr.ap-southeast-1.amazonaws.com/recsys-cdc-lambda:latest`).
+
+---
+
+## 📍 Bước 4: Tạo RDS PostgreSQL Database Instance (Nếu Chưa Có)
+
+Do ở bước Clean Destroy chúng ta đã xóa sạch RDS cũ, bạn cần chạy 1 lệnh để tạo lại RDS Database Instance trên AWS:
 
 ```bash
-# Attach Parameter Group và reboot RDS
-aws rds modify-db-instance \
+aws rds create-db-instance \
   --db-instance-identifier recsys-oltp \
+  --db-instance-class db.t3.micro \
+  --engine postgres \
+  --engine-version 18.1 \
+  --allocated-storage 20 \
+  --master-username postgres \
+  --master-user-password <YOUR_RDS_PASSWORD> \
+  --db-name postgres \
+  --publicly-accessible \
   --db-parameter-group-name recsys-cdc-logical-repl \
-  --apply-immediately --region ap-southeast-1
-
-aws rds reboot-db-instance --db-instance-identifier recsys-oltp --region ap-southeast-1
+  --vpc-security-group-ids <YOUR_SECURITY_GROUP_ID> \
+  --region ap-southeast-1
 ```
 
-Sau khi RDS reboot thành công, dùng `psql` hoặc DBeaver kết nối vào database `recsys_oltp` và thực thi:
-```sql
-CREATE EXTENSION IF NOT EXISTS pglogical;
-CREATE PUBLICATION recsys_cdc_pub FOR TABLE movie_ratings;
-```
-
-### Bước 1.4: Khởi động DMS Replication Task
+*Lấy Endpoint URL mới sau khi RDS khởi tạo xong (~3-4 phút):*
 ```bash
-# Lấy lệnh start task từ Terraform output và chạy
-$(terraform output -raw start_task_command)
-```
-
-### Bước 1.5: (Tuỳ chọn) Chạy Service Kiểm tra Data Drift (Evidently AI)
-```bash
-# Build và chạy container check drift
-cd data_pipeline/check_drift
-docker build -t recsys-drift-checker:latest .
-docker run -d --name recsys-drift-checker \
-  -e AWS_REGION=ap-southeast-1 \
-  -e STREAM_NAME=recsys-cdc \
-  -e USE_RDS=1 \
-  -e RDS_HOST=recsys-oltp.xxxxxx.ap-southeast-1.rds.amazonaws.com \
-  recsys-drift-checker:latest
+aws rds describe-db-instances --db-instance-identifier recsys-oltp --query "DBInstances[0].Endpoint.Address" --output text --region ap-southeast-1
 ```
 
 ---
 
-## 🏗️ 2. Giai Đoạn 5: Triển Khai Serving Cluster (Triton + Qdrant + Gateway)
+## 📍 Bước 5: Triển Khai Luồng Real-Time CDC Bằng Terraform CDC
 
-### Bước 2.1: Build & Push các Serving Container Images
-```bash
-# Build và push 3 container images: Triton server, Feast API, API Gateway
-export DOCKER_USER=nmcuong08
-export TAG=v1
-bash infra/scripts/build_push_serving.sh
-```
+1. Mở file `infra/terraform_cdc/terraform.tfvars` và điền cấu hình:
+   ```hcl
+   aws_region                  = "ap-southeast-1"
+   rds_endpoint                = "<RDS_ENDPOINT_CỦA_BẠN>"
+   rds_user                    = "postgres"
+   rds_password                = "<YOUR_RDS_PASSWORD>"
+   lambda_image_uri            = "<ACCOUNT_ID>.dkr.ecr.ap-southeast-1.amazonaws.com/recsys-cdc-lambda:latest"
+   dms_vpc_subnet_ids          = ["<YOUR_SUBNET_ID_1>", "<YOUR_SUBNET_ID_2>"]
+   dms_vpc_security_group_ids = ["<YOUR_SECURITY_GROUP_ID>"]
+   ```
 
-### Bước 2.2: Sync Triton Model Repository lên S3 / MinIO
-```bash
-# Đẩy toàn bộ cấu trúc ONNX model repository lên S3/MinIO bucket
-aws --endpoint-url http://localhost:9000 s3 sync \
-    models/ranking_sequence/model_repository/ s3://recsys-triton-repo/
-```
+2. Khởi chạy Terraform CDC:
+   ```powershell
+   cd infra/terraform_cdc
+   terraform init
+   terraform apply -auto-approve
+   ```
 
-### Bước 2.3: Nạp Vector Embeddings vào Qdrant & Redis Cache
-```bash
-# 1. Khởi chạy Redis & Qdrant local hoặc K8s service
-uv run python -m src.caching_offline.load_qdrant
-```
-
-### Bước 2.4: Triển khai KServe & Triton Server trên Kubernetes
-```bash
-# 1. Cài đặt KServe CRD & Knative Serving
-bash infra/serving-cluster/deploy_kserve.sh
-
-# 2. Deploy Qdrant Vector Database
-helm install qdrant infra/qdrant -n kubeflow-user-example-com --create-namespace
-
-# 3. Deploy Feast API Service
-kubectl apply -f feature/feature_store/deployment.yaml
-kubectl apply -f feature/feature_store/service.yaml
-
-# 4. Deploy API Gateway
-kubectl apply -f api_gateway/deployment.yaml
-kubectl apply -f api_gateway/service.yaml
-
-# 5. Deploy Triton InferenceService
-kubectl apply -f infra/serving-cluster/inferenceservice-triton.yaml
-```
-
-### Bước 2.5: Kiểm thử API Gợi Ý (Verification)
-```bash
-# Kiểm tra endpoint API Gateway
-curl -X POST http://localhost:8080/recommend \
-     -H "Content-Type: application/json" \
-     -d '{"user_id": 1, "current_item_id": 10}'
-```
-*Kỳ vọng: API trả về mã `HTTP 200 OK` chứa danh sách 10 bộ phim được gợi ý kèm điểm số xếp hạng.*
+3. Lưu giá trị output:
+   - `dms_replication_task_arn`: ARN của DMS Replication Task.
+   - `s3_cdc_events_bucket`: Tên S3 Bucket nhận sự kiện CDC (`recsys-cdc-events-<ACCOUNT_ID>`).
 
 ---
 
-## ⚙️ 3. Giai Đoạn 6: Triển Khai CI/CD, Watcher Pod & Monitoring
+## 📍 Bước 6: Tạo Bảng Database & Kích Hoạt Logical Replication (RDS)
 
-### Bước 3.1: Triển khai Jenkins Stack & MLflow Model Watcher
-```bash
-# 1. Install Jenkins Helm Stack
-helm install jenkins infra/jenkins-stack/ -n jenkins --create-namespace
+1. Chạy Python script tạo bảng `movie_ratings` và khởi tạo Native Logical Publication (thay `<RDS_ENDPOINT>` và `<YOUR_RDS_PASSWORD>` tương ứng):
+   ```powershell
+   cd E:\MachineLearning\Recommendation_System
+   .venv\Scripts\python.exe -c "import psycopg2; conn = psycopg2.connect('postgresql://postgres:<YOUR_RDS_PASSWORD>@<RDS_ENDPOINT>:5432/postgres'); conn.autocommit=True; cur=conn.cursor(); cur.execute('CREATE TABLE IF NOT EXISTS movie_ratings (user_id INT, movie_id INT, rating FLOAT, timestamp BIGINT, PRIMARY KEY (user_id, movie_id));'); cur.execute('CREATE PUBLICATION recsys_cdc_pub FOR TABLE movie_ratings;'); print('✅ DB Table & Publication Created!')"
+   ```
 
-# 2. Deploy Watcher Pod theo dõi MLflow Champion Model
-kubectl apply -f infra/jenkins-stack/watcher-pod/deployment.yaml -n kubeflow-user-example-com
+---
+
+## 📍 Bước 7: Khởi Động DMS Task & Kiểm Thử Luồng CDC Real-Time
+
+1. Lấy ARN của DMS Task bằng lệnh CLI:
+   ```bash
+   TASK_ARN=$(aws dms describe-replication-tasks --query "ReplicationTasks[0].ReplicationTaskArn" --output text --region ap-southeast-1)
+   ```
+
+2. Khởi động DMS Replication Task:
+   ```bash
+   aws dms start-replication-task --replication-task-arn $TASK_ARN --region ap-southeast-1 --start-replication-task-type start-replication
+   ```
+
+3. Chèn dữ liệu rating mới vào RDS PostgreSQL để test CDC:
+   ```powershell
+   .venv\Scripts\python.exe -c "import psycopg2; conn = psycopg2.connect('postgresql://postgres:<YOUR_RDS_PASSWORD>@<RDS_ENDPOINT>:5432/postgres'); conn.autocommit=True; cur=conn.cursor(); cur.execute('INSERT INTO movie_ratings (user_id, movie_id, rating, timestamp) VALUES (9999, 10, 5.0, 1600000000);'); print('✅ Inserted test rating!')"
+   ```
+
+4. Kiểm tra kết quả CDC ghi vào S3 & AWS CloudWatch Lambda Logs:
+
+   Nếu dùng **PowerShell**:
+   ```powershell
+   $ACCOUNT_ID = (aws sts get-caller-identity --query Account --output text)
+   aws s3 ls "s3://recsys-cdc-events-$ACCOUNT_ID/cdc_events/" --recursive --region ap-southeast-1
+   aws logs tail /aws/lambda/recsys-cdc-lambda --region ap-southeast-1
+   ```
+
+   Nếu dùng **Git Bash (MINGW64)**:
+   ```bash
+   ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+   aws s3 ls "s3://recsys-cdc-events-${ACCOUNT_ID}/cdc_events/" --recursive --region ap-southeast-1
+   aws logs tail /aws/lambda/recsys-cdc-lambda --region ap-southeast-1
+   ```
+
+---
+
+## 📍 Bước 8: Triển Chạy Serving Stack Trên AWS EC2 Server
+
+Toàn bộ mô hình Deep Learning Triton Server, Qdrant Vector DB, Redis Cache và FastAPI Gateway sẽ chạy **100% trên AWS EC2 Server**, giúp máy laptop của bạn không bị nóng hay tốn RAM.
+
+1. **Nạp dữ liệu Vector nhúng vào Qdrant DB & Popularity Cache**:
+   ```powershell
+   .venv\Scripts\python.exe -m src.caching_offline.load_qdrant
+   ```
+
+2. **Kết nối vào AWS EC2 Server (Lấy Instance ID tự động, KHÔNG CẦN FILE KEY .pem)**:
+
+   Nếu dùng **Git Bash**:
+   ```bash
+   INSTANCE_ID=$(aws ec2 describe-instances --filters "Name=instance-state-name,Values=running" --query "Reservations[0].Instances[0].InstanceId" --output text --region ap-southeast-1)
+   aws ec2-instance-connect ssh --instance-id $INSTANCE_ID --os-user ubuntu --region ap-southeast-1
+   ```
+
+   Nếu dùng **PowerShell**:
+   ```powershell
+   $INSTANCE_ID = (aws ec2 describe-instances --filters "Name=instance-state-name,Values=running" --query "Reservations[0].Instances[0].InstanceId" --output text --region ap-southeast-1)
+   aws ec2-instance-connect ssh --instance-id $INSTANCE_ID --os-user ubuntu --region ap-southeast-1
+   ```
+
+3. **Khởi chạy Docker Serving Cluster trên EC2**:
+   Khi màn hình đen terminal EC2 xuất hiện, copy & dán khối lệnh này:
+   ```bash
+   git clone https://github.com/NMCuonG08/Recommendation-System-And-AWS-Deployment.git Recommendation_System
+   cd Recommendation_System
+   docker compose up -d
+   ```
+
+---
+
+## 📍 Bước 9: Kiểm Thử API Gợi Ý Trực Tiếp Qua AWS EC2 Public IP
+
+Gửi HTTP POST request tới EC2 Public IP (`<EC2_PUBLIC_IP>:8080`) để nhận kết quả gợi ý phim từ mô hình Deep Learning chạy trên AWS:
+
+```powershell
+# Lấy EC2 IP tự động:
+$EC2_IP = (aws ec2 describe-instances --query "Reservations[0].Instances[0].PublicIpAddress" --output text --region ap-southeast-1)
+
+curl -X POST "http://${EC2_IP}:8080/recommend" -H "Content-Type: application/json" -d "{\"user_id\": 1, \"current_item_id\": 10}"
 ```
 
-### Bước 3.2: Chạy Giả Lập Tải (Load Testing) bằng Locust
-```bash
-# Chạy Locust test API Gateway với 50 người dùng giả lập
-uv run locust -f locustfile.py --host http://localhost:8080 --users 50 --spawn-rate 5
-```
-
-### Bước 3.3: Triển khai Kubeflow Dashboard Links & Grafana ConfigMap
-```bash
-# Apply ConfigMap chứa liên kết điều hướng Kubeflow, MLflow, Jenkins & Grafana
-kubectl apply -f infra/monitoring/dashboard-config.yaml
+**Kỳ vọng kết quả (HTTP 200 OK từ EC2 Server AWS):**
+```json
+{
+  "user_id": 1,
+  "recommendations": [
+    {"item_id": 318, "score": 0.9421},
+    {"item_id": 296, "score": 0.9150},
+    {"item_id": 593, "score": 0.8872}
+  ]
+}
 ```
 
 ---
 
-## 📝 Tổng Kết Trạng Thái Triển Khai
+## 🎯 Tổng Kết
 
-| Phân hệ | Mã nguồn & Config | Trạng thái Triển khai | Hành động khuyến nghị tiếp theo |
-|---------|-------------------|----------------------|--------------------------------|
-| **Stage 3 (CDC)** | ✅ Hoàn thành (`app.py`, `lambda_function.py`, `terraform_cdc/`) | 🟡 Sẵn sàng deploy | Thực hiện Bước 1.1 đến 1.4 khi sẵn sàng kết nối RDS AWS |
-| **Stage 5 (Serving)** | ✅ Hoàn thành (`api_gateway`, `inferenceservice-triton.yaml`, `load_qdrant.py`) | 🟡 Sẵn sàng deploy | Thực hiện Bước 2.1 đến 2.5 để test endpoint trên cluster local hoặc EKS |
-| **Stage 6 (CI/CD)** | ✅ Hoàn thành (`Jenkinsfile`, `watcher-pod`, `dashboard-config.yaml`) | 🟡 Sẵn sàng deploy | Helm install Jenkins stack và apply Watcher Pod |
+Hệ thống Recommendation System của bạn thiết kế theo chuẩn doanh nghiệp (Production Grade):
+- **Real-Time CDC**: RDS PostgreSQL ➔ AWS DMS ➔ S3 ➔ Lambda ➔ Feast Online Store.
+- **Deep Learning Serving**: Triton Inference Server (ONNX Ensemble) + Qdrant Vector Search + Redis Cache + FastApi Gateway (chạy 100% trên AWS EC2).
+- **Hạ Tầng Tự Động**: 100% Khai báo bằng Infrastructure as Code (Terraform).

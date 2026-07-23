@@ -8,8 +8,9 @@ data "aws_region" "current" {}
 # Secrets (RDS password for DMS, Feast registry URI for Lambda)
 # --------------------------------------------------------------------------- #
 resource "aws_secretsmanager_secret" "rds_password" {
-  name        = "recsys-cdc/rds_password"
-  description = "RDS master password for the DMS source endpoint."
+  name                    = "recsys-cdc/rds_password"
+  description             = "RDS master password for the DMS source endpoint."
+  recovery_window_in_days = 0
 }
 
 resource "aws_secretsmanager_secret_version" "rds_password" {
@@ -18,8 +19,9 @@ resource "aws_secretsmanager_secret_version" "rds_password" {
 }
 
 resource "aws_secretsmanager_secret" "feast_uri" {
-  name        = "recsys-cdc/feast_postgres_uri"
-  description = "Feast sql registry URI read by the CDC Lambda at runtime."
+  name                    = "recsys-cdc/feast_postgres_uri"
+  description             = "Feast sql registry URI read by the CDC Lambda at runtime."
+  recovery_window_in_days = 0
 }
 
 resource "aws_secretsmanager_secret_version" "feast_uri" {
@@ -43,7 +45,7 @@ resource "aws_sqs_queue" "cdc" {
 # --------------------------------------------------------------------------- #
 resource "aws_db_parameter_group" "cdc" {
   name        = "recsys-cdc-logical-repl"
-  family      = "postgres16"
+  family      = "postgres18"
   description = "Enable logical replication for DMS CDC."
 
   parameter {
@@ -77,6 +79,26 @@ resource "aws_iam_role_policy_attachment" "dms_vpc" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonDMSVPCManagementRole"
 }
 
+resource "aws_iam_role_policy" "dms_s3" {
+  name = "dms-s3-policy"
+  role = aws_iam_role.dms_vpc.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["s3:PutObject", "s3:GetObject", "s3:DeleteObject", "s3:PutObjectAcl", "s3:GetBucketLocation"]
+        Resource = ["${aws_s3_bucket.cdc.arn}", "${aws_s3_bucket.cdc.arn}/*"]
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["s3:ListBucket", "s3:ListAllMyBuckets"]
+        Resource = "*"
+      }
+    ]
+  })
+}
+
 resource "aws_iam_role" "dms_cloudwatch" {
   name = "dms-cloudwatch-logs-role"
   assume_role_policy = jsonencode({
@@ -108,12 +130,17 @@ resource "aws_dms_replication_instance" "cdc" {
   replication_subnet_group_id = aws_dms_replication_subnet_group.cdc.id
   publicly_accessible         = false
   auto_minor_version_upgrade  = true
+
+  depends_on = [
+    aws_iam_role_policy_attachment.dms_vpc,
+    aws_iam_role_policy_attachment.dms_cloudwatch
+  ]
 }
 
 resource "aws_dms_endpoint" "source" {
   endpoint_id   = "recsys-cdc-source-rds"
   endpoint_type = "source"
-  engine_name   = "aurora-postgresql" # works for RDS Postgres too
+  engine_name   = "postgres"
   server_name   = var.rds_endpoint
   port          = var.rds_port
   username      = var.rds_user
@@ -133,6 +160,20 @@ resource "aws_s3_bucket" "cdc" {
   tags = { Project = "recsys-cdc" }
 }
 
+data "aws_subnet" "selected" {
+  id = var.dms_vpc_subnet_ids[0]
+}
+
+data "aws_route_tables" "vpc_rts" {
+  vpc_id = data.aws_subnet.selected.vpc_id
+}
+
+resource "aws_vpc_endpoint" "s3" {
+  vpc_id          = data.aws_subnet.selected.vpc_id
+  service_name    = "com.amazonaws.${data.aws_region.current.name}.s3"
+  route_table_ids = data.aws_route_tables.vpc_rts.ids
+}
+
 resource "aws_dms_endpoint" "target" {
   endpoint_id   = "recsys-cdc-target-s3"
   endpoint_type = "target"
@@ -140,6 +181,7 @@ resource "aws_dms_endpoint" "target" {
 
   s3_settings {
     bucket_name             = aws_s3_bucket.cdc.id
+    bucket_folder           = "cdc_events"
     service_access_role_arn = aws_iam_role.dms_vpc.arn
     data_format             = "csv"
     timestamp_column_name   = "timestamp"

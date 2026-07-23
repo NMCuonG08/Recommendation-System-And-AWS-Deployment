@@ -23,6 +23,8 @@ data "aws_subnets" "default" {
   }
 }
 
+data "aws_caller_identity" "current" {}
+
 data "aws_ami" "ubuntu" {
   most_recent = true
   owners      = ["099720109477"] # Canonical (Ubuntu)
@@ -30,6 +32,16 @@ data "aws_ami" "ubuntu" {
   filter {
     name   = "name"
     values = ["ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-*"]
+  }
+}
+
+resource "aws_s3_bucket" "triton_repo" {
+  bucket        = "recsys-triton-repo-${data.aws_caller_identity.current.account_id}"
+  force_destroy = true
+
+  tags = {
+    Name    = "recsys-triton-repo"
+    Project = "recsys-serving"
   }
 }
 
