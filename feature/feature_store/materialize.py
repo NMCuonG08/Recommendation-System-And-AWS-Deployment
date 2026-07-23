@@ -95,8 +95,10 @@ def main() -> None:
         logger.info("Feast apply complete.")
 
     end_ts = args.end or _latest_event_timestamp()
-    logger.info("Materializing online features [%s, %s]...", args.start, end_ts)
-    store.materialize(start_date=args.start, end_date=end_ts)
+    start_dt = datetime.fromisoformat(args.start).replace(tzinfo=timezone.utc)
+    end_dt = datetime.fromisoformat(end_ts).replace(tzinfo=timezone.utc) if isinstance(end_ts, str) else end_ts
+    logger.info("Materializing online features [%s, %s]...", start_dt, end_dt)
+    store.materialize(start_date=start_dt, end_date=end_dt)
     logger.info("Materialize complete. Online store populated.")
 
 
