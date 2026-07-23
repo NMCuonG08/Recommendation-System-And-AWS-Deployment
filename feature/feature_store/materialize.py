@@ -79,8 +79,11 @@ def main() -> None:
     # Activate the chosen config as feature_store.yaml (Feast reads this name).
     active_yaml = REPO_DIR / "feature_store.yaml"
     if config_path != active_yaml:
-        logger.info("Activating config %s -> feature_store.yaml", args.config)
-        active_yaml.write_text(config_path.read_text(encoding="utf-8"), encoding="utf-8")
+        try:
+            logger.info("Activating config %s -> feature_store.yaml", args.config)
+            active_yaml.write_text(config_path.read_text(encoding="utf-8"), encoding="utf-8")
+        except OSError:
+            logger.info("Config already active or read-only filesystem; proceeding with active config.")
 
     from feast import FeatureStore
 
