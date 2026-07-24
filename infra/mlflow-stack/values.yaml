@@ -3,7 +3,7 @@ namespace: mlflow
 
 mlflow:
   # Built from infra/images/mlflow.Dockerfile; push via infra/scripts/build_push.sh.
-  image: nmcuong08/recsys-mlflow:v1
+  image: cuongngx/recsys-mlflow:v1
   s3Endpoint: http://minio-service:9000
   bucket: mlflow-artifacts
 
@@ -11,7 +11,7 @@ minio:
   accessKey: admin
   secretKey: Password1234
   storage: 5Gi
-  image: quay.io/minio/minio:RELEASE.2024-10-13T13-34-50Z
+  image: minio/minio:latest
 
 postgres:
   password: Password1234

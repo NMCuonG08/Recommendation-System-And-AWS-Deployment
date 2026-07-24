@@ -4,7 +4,10 @@
 #   - API Gateway   (api_gateway/Dockerfile, repo-root context)
 #   - Feast API     (feature/feature_store/feature_store_api.Dockerfile, repo-root context)
 #
-#   DOCKER_USER=nmcuong08 TAG=v1 bash infra/scripts/build_push_serving.sh
+# Usage:
+#   DOCKER_USER=cuongngx TAG=v1 bash infra/scripts/build_push_serving.sh
+#   OR on Windows PowerShell:
+#   bash infra/scripts/build_push_serving.sh cuongngx v1
 #
 # Produces:
 #   <DOCKER_USER>/recsys-triton:<TAG>
@@ -17,12 +20,15 @@
 #   feature/feature_store/deployment.yaml               -> recsys-feature-store-api
 set -euo pipefail
 
-DOCKER_USER="${DOCKER_USER:?Set DOCKER_USER to your Docker Hub username, e.g. DOCKER_USER=nmcuong08}"
-TAG="${TAG:-v1}"
+export DOCKER_BUILDKIT=1
+
+DOCKER_USER="${1:-${DOCKER_USER:-cuongngx}}"
+TAG="${2:-${TAG:-v1}}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
+echo "==> Using DOCKER_USER=${DOCKER_USER}, TAG=${TAG} (BuildKit enabled)"
 echo "==> Building ${DOCKER_USER}/recsys-triton:${TAG} (context: repo root)"
 docker build -t "${DOCKER_USER}/recsys-triton:${TAG}" \
     -f "${REPO_ROOT}/infra/serving-cluster/Dockerfile.triton" "${REPO_ROOT}"

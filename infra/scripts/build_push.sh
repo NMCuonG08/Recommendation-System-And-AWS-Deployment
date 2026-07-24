@@ -1,20 +1,26 @@
 #!/usr/bin/env bash
 # Build and push the two EKS images (MLflow server + Ray worker) to Docker Hub.
 #
-#   DOCKER_USER=<your-docker-hub-username> TAG=v1 bash infra/scripts/build_push.sh
+# Usage:
+#   DOCKER_USER=cuongngx TAG=v1 bash infra/scripts/build_push.sh
+#   OR on Windows PowerShell:
+#   bash infra/scripts/build_push.sh cuongngx v1
 #
 # Produces:
 #   <DOCKER_USER>/recsys-mlflow:<TAG>  (from infra/images/mlflow.Dockerfile)
 #   <DOCKER_USER>/recsys-ray:<TAG>     (from infra/images/ray.Dockerfile, repo root context)
 set -euo pipefail
 
-DOCKER_USER="${DOCKER_USER:?Set DOCKER_USER to your Docker Hub username, e.g. DOCKER_USER=nmcuong08}"
-TAG="${TAG:-v1}"
+export DOCKER_BUILDKIT=1
+
+DOCKER_USER="${1:-${DOCKER_USER:-cuongngx}}"
+TAG="${2:-${TAG:-v1}}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 IMAGES_DIR="${REPO_ROOT}/infra/images"
 
+echo "==> Using DOCKER_USER=${DOCKER_USER}, TAG=${TAG} (BuildKit enabled)"
 echo "==> Building ${DOCKER_USER}/recsys-mlflow:${TAG}"
 docker build -t "${DOCKER_USER}/recsys-mlflow:${TAG}" \
     -f "${IMAGES_DIR}/mlflow.Dockerfile" "${IMAGES_DIR}"
